@@ -1,4 +1,0 @@
-﻿id,ts,module,severity,event_type,summary,details,risk_score
-1,2026-02-14T12:00:00Z,System Integrity Scanner,medium,startup_script_detected,Unexpected startup script discovered,C:/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/updater.ps1,64
-2,2026-02-14T12:03:16Z,Network Surveillance Layer,high,suspicious_port,Potential C2 outbound connection,185.41.22.9:4444 established by pid 5580,39
-3,2026-02-14T12:11:47Z,Human Risk Monitor,high,weak_password_pattern,Weak password policy violation,Password sample matched dictionary token,48

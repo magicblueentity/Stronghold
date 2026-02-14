@@ -1,9 +1,29 @@
-﻿# Build outputs
-src-tauri/target/
-stronghold_data/
+/target
 
-# local config
-appsettings.json
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.tmp
+Thumbs.db
+.DS_Store
 
-# node
+# Runtime output
+logs/*.log
+logs/quarantine/
+logs/system_snapshot.json
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts
+dist/
+release/
+debug/
+*.exe
+*.dll
+*.pdb
+
+# Legacy hybrid stack
 node_modules/
+src-tauri/target/

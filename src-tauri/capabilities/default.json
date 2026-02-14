@@ -1,9 +1,0 @@
-﻿{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Default desktop capabilities for Stronghold",
-  "windows": ["main"],
-  "permissions": [
-    "core:default"
-  ]
-}
