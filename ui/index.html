@@ -22,6 +22,7 @@
       <button class="nav-btn" data-view="threat">Threat Center</button>
       <button class="nav-btn" data-view="health">System Health</button>
       <button class="nav-btn" data-view="logs">Logs</button>
+      <button class="nav-btn" data-view="settings">Settings</button>
     </nav>
 
     <main>
@@ -100,6 +101,28 @@
             </thead>
             <tbody id="logRows"></tbody>
           </table>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="card">
+          <h2>Sicherheits-Einstellungen</h2>
+          <div class="settings-grid">
+            <label>CPU Alert Threshold (%)
+              <input type="number" id="cpuThresholdInput" min="20" max="95" step="1" />
+            </label>
+            <label>Memory Alert Threshold (%)
+              <input type="number" id="memoryThresholdInput" min="20" max="95" step="1" />
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" id="dryRunInput" />
+              Response Engine im Dry-Run-Modus
+            </label>
+          </div>
+          <div class="actions">
+            <button id="saveSettingsBtn">Einstellungen speichern</button>
+            <button id="reloadSettingsBtn">Neu laden</button>
+          </div>
         </div>
       </section>
     </main>

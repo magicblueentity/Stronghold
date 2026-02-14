@@ -1,7 +1,7 @@
 ﻿use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -9,9 +9,12 @@ use chrono::Utc;
 use sha2::{Digest, Sha256};
 use sysinfo::System;
 
-use crate::{config::AppConfig, models::{ModuleFinding, ModuleReport}};
+use crate::{
+    config::AppConfig,
+    models::{ModuleFinding, ModuleReport},
+};
 
-pub fn run_system_integrity_scan(config: &AppConfig) -> ModuleReport {
+pub fn run_system_integrity_scan(config: &AppConfig, data_dir: &Path) -> ModuleReport {
     let started_at = Utc::now();
     let mut findings = Vec::new();
 
@@ -31,13 +34,16 @@ pub fn run_system_integrity_scan(config: &AppConfig) -> ModuleReport {
                 module: "System Integrity Scanner".to_string(),
                 severity: "high".to_string(),
                 title: "Suspicious process signature".to_string(),
-                details: format!("Process '{}' matched suspicious signatures", proc.name().to_string_lossy()),
+                details: format!(
+                    "Process '{}' matched suspicious signatures",
+                    proc.name().to_string_lossy()
+                ),
                 score_impact: -15,
             });
         }
     }
 
-    findings.extend(check_critical_files(&config.critical_files));
+    findings.extend(check_critical_files(&config.critical_files, data_dir));
     findings.extend(check_registry_keys(&config.registry_keys));
     findings.extend(check_startup_items(&config.startup_paths));
 
@@ -53,8 +59,11 @@ pub fn run_system_integrity_scan(config: &AppConfig) -> ModuleReport {
     }
 }
 
-fn check_critical_files(paths: &[PathBuf]) -> Vec<ModuleFinding> {
+fn check_critical_files(paths: &[PathBuf], data_dir: &Path) -> Vec<ModuleFinding> {
     let mut findings = Vec::new();
+    let baseline_path = data_dir.join("critical_file_baseline.json");
+    let mut baseline = load_baseline(&baseline_path);
+    let mut baseline_changed = false;
 
     for path in paths {
         if !path.exists() {
@@ -68,22 +77,27 @@ fn check_critical_files(paths: &[PathBuf]) -> Vec<ModuleFinding> {
             continue;
         }
 
-        match fs::read(path) {
-            Ok(contents) => {
-                let mut hasher = Sha256::new();
-                hasher.update(contents);
-                let digest = format!("{:x}", hasher.finalize());
-                if digest.starts_with("0000") {
-                    findings.push(ModuleFinding {
-                        module: "System Integrity Scanner".to_string(),
-                        severity: "medium".to_string(),
-                        title: "Unusual hash pattern".to_string(),
-                        details: format!(
-                            "File {} has an unusual hash prefix (heuristic trigger)",
-                            path.display()
-                        ),
-                        score_impact: -6,
-                    });
+        match hash_file(path) {
+            Ok(digest) => {
+                let key = path.to_string_lossy().to_string();
+                match baseline.get(&key) {
+                    Some(known) if known != &digest => {
+                        findings.push(ModuleFinding {
+                            module: "System Integrity Scanner".to_string(),
+                            severity: "high".to_string(),
+                            title: "Critical file hash changed".to_string(),
+                            details: format!(
+                                "Hash changed for {}. Validate patches/signatures.",
+                                path.display()
+                            ),
+                            score_impact: -15,
+                        });
+                    }
+                    None => {
+                        baseline.insert(key, digest);
+                        baseline_changed = true;
+                    }
+                    _ => {}
                 }
             }
             Err(err) => {
@@ -98,6 +112,17 @@ fn check_critical_files(paths: &[PathBuf]) -> Vec<ModuleFinding> {
         }
     }
 
+    if baseline_changed {
+        let _ = save_baseline(&baseline_path, &baseline);
+        findings.push(ModuleFinding {
+            module: "System Integrity Scanner".to_string(),
+            severity: "low".to_string(),
+            title: "Integrity baseline initialized".to_string(),
+            details: "Critical-file baseline was created for future tamper detection".to_string(),
+            score_impact: 0,
+        });
+    }
+
     findings
 }
 
@@ -105,20 +130,27 @@ fn check_registry_keys(keys: &[String]) -> Vec<ModuleFinding> {
     let mut findings = Vec::new();
 
     for key in keys {
-        let output = Command::new("reg")
-            .args(["query", key])
-            .output();
+        let output = Command::new("reg").args(["query", key]).output();
 
         match output {
             Ok(out) if out.status.success() => {
-                let body = String::from_utf8_lossy(&out.stdout);
-                if body.to_lowercase().contains("powershell -enc") {
+                let body = String::from_utf8_lossy(&out.stdout).to_lowercase();
+                if body.contains("powershell -enc") || body.contains("frombase64string") {
                     findings.push(ModuleFinding {
                         module: "System Integrity Scanner".to_string(),
                         severity: "high".to_string(),
                         title: "Potential obfuscated autorun".to_string(),
-                        details: format!("Registry key contains encoded PowerShell command: {}", key),
+                        details: format!("Registry key contains obfuscated launch pattern: {}", key),
                         score_impact: -12,
+                    });
+                }
+                if body.contains("\\appdata\\") && body.contains(".js") {
+                    findings.push(ModuleFinding {
+                        module: "System Integrity Scanner".to_string(),
+                        severity: "medium".to_string(),
+                        title: "Unusual script autorun path".to_string(),
+                        details: format!("Autorun entry references AppData script path: {}", key),
+                        score_impact: -7,
                     });
                 }
             }
@@ -128,7 +160,7 @@ fn check_registry_keys(keys: &[String]) -> Vec<ModuleFinding> {
                     severity: "low".to_string(),
                     title: "Registry key unavailable".to_string(),
                     details: format!("Could not query registry key {}", key),
-                    score_impact: -3,
+                    score_impact: -2,
                 });
             }
             Err(err) => {
@@ -159,7 +191,7 @@ fn check_startup_items(paths: &[PathBuf]) -> Vec<ModuleFinding> {
                 let p = entry.path();
                 if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
                     let ext = ext.to_lowercase();
-                    if ["ps1", "vbs", "js", "hta"].contains(&ext.as_str()) {
+                    if ["ps1", "vbs", "js", "hta", "bat", "cmd"].contains(&ext.as_str()) {
                         findings.push(ModuleFinding {
                             module: "System Integrity Scanner".to_string(),
                             severity: "medium".to_string(),
@@ -174,6 +206,32 @@ fn check_startup_items(paths: &[PathBuf]) -> Vec<ModuleFinding> {
     }
 
     findings
+}
+
+fn hash_file(path: &Path) -> anyhow::Result<String> {
+    let bytes = fs::read(path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn load_baseline(path: &Path) -> HashMap<String, String> {
+    if !path.exists() {
+        return HashMap::new();
+    }
+    let raw = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return HashMap::new(),
+    };
+    serde_json::from_str::<HashMap<String, String>>(&raw).unwrap_or_default()
+}
+
+fn save_baseline(path: &Path, data: &HashMap<String, String>) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(data)?)?;
+    Ok(())
 }
 
 fn score_from_findings(start: i16, findings: &[ModuleFinding]) -> u8 {

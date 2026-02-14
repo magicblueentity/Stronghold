@@ -1,15 +1,20 @@
-﻿use std::{fs, path::PathBuf, time::{Duration, SystemTime}};
+﻿use std::{
+    fs,
+    path::PathBuf,
+    process::Command,
+    time::{Duration, SystemTime},
+};
 
 use chrono::Utc;
 
-use crate::{config::AppConfig, models::{ModuleFinding, ModuleReport}};
+use crate::models::{ModuleFinding, ModuleReport};
 
-pub fn run_human_risk_monitor(config: &AppConfig, password_samples: Vec<String>) -> ModuleReport {
+pub fn run_human_risk_monitor() -> ModuleReport {
     let started_at = Utc::now();
     let mut findings = Vec::new();
 
     findings.extend(scan_downloads_folder());
-    findings.extend(check_weak_passwords(config, password_samples));
+    findings.extend(check_windows_security_posture());
 
     let score = score_from_findings(100, &findings);
     let finished_at = Utc::now();
@@ -36,9 +41,13 @@ fn scan_downloads_folder() -> Vec<ModuleFinding> {
     if let Ok(entries) = fs::read_dir(downloads) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
 
-            if ["exe", "msi", "bat", "cmd", "ps1"].contains(&ext.as_str()) {
+            if ["exe", "msi", "bat", "cmd", "ps1", "js"].contains(&ext.as_str()) {
                 let recently_modified = fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .map(|d| d > threshold)
@@ -60,36 +69,96 @@ fn scan_downloads_folder() -> Vec<ModuleFinding> {
     findings
 }
 
-fn check_weak_passwords(config: &AppConfig, samples: Vec<String>) -> Vec<ModuleFinding> {
+fn check_windows_security_posture() -> Vec<ModuleFinding> {
     let mut findings = Vec::new();
 
-    for sample in samples {
-        let lowered = sample.to_lowercase();
-        let weak = config
-            .weak_password_patterns
-            .iter()
-            .any(|p| lowered.contains(&p.to_lowercase()));
+    if is_uac_disabled() {
+        findings.push(ModuleFinding {
+            module: "Human Risk Monitor".to_string(),
+            severity: "high".to_string(),
+            title: "UAC disabled".to_string(),
+            details: "EnableLUA is disabled. Re-enable User Account Control for safer elevation boundaries.".to_string(),
+            score_impact: -14,
+        });
+    }
 
-        if weak || sample.len() < 10 {
-            findings.push(ModuleFinding {
-                module: "Human Risk Monitor".to_string(),
-                severity: "high".to_string(),
-                title: "Weak password pattern".to_string(),
-                details: format!("Password sample '{}' violates security policy", mask(&sample)),
-                score_impact: -14,
-            });
-        }
+    if is_smartscreen_off() {
+        findings.push(ModuleFinding {
+            module: "Human Risk Monitor".to_string(),
+            severity: "medium".to_string(),
+            title: "SmartScreen appears disabled".to_string(),
+            details: "Microsoft SmartScreen protection is off or unavailable for check.".to_string(),
+            score_impact: -8,
+        });
+    }
+
+    if is_defender_realtime_disabled() {
+        findings.push(ModuleFinding {
+            module: "Human Risk Monitor".to_string(),
+            severity: "high".to_string(),
+            title: "Real-time AV protection disabled".to_string(),
+            details: "Windows Defender real-time protection appears disabled.".to_string(),
+            score_impact: -16,
+        });
     }
 
     findings
 }
 
-fn mask(value: &str) -> String {
-    let chars: Vec<char> = value.chars().collect();
-    if chars.len() < 3 {
-        return "***".to_string();
+fn is_uac_disabled() -> bool {
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+            "/v",
+            "EnableLUA",
+        ])
+        .output();
+
+    let Ok(out) = output else { return false; };
+    if !out.status.success() {
+        return false;
     }
-    format!("{}***{}", chars[0], chars[chars.len() - 1])
+
+    let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+    text.contains("0x0")
+}
+
+fn is_smartscreen_off() -> bool {
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer",
+            "/v",
+            "SmartScreenEnabled",
+        ])
+        .output();
+
+    let Ok(out) = output else { return false; };
+    if !out.status.success() {
+        return false;
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+    text.contains("off")
+}
+
+fn is_defender_realtime_disabled() -> bool {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "(Get-MpComputerStatus).RealTimeProtectionEnabled",
+        ])
+        .output();
+
+    let Ok(out) = output else { return false; };
+    if !out.status.success() {
+        return false;
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+    text == "false"
 }
 
 fn score_from_findings(start: i16, findings: &[ModuleFinding]) -> u8 {

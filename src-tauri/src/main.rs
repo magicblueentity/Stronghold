@@ -24,6 +24,8 @@ use crate::{
 struct AppState {
     db: Mutex<Database>,
     config: RwLock<AppConfig>,
+    app_dir: PathBuf,
+    data_dir: PathBuf,
     last_scan_at: Mutex<Option<DateTime<Utc>>>,
     latest_map: Mutex<Vec<MapNode>>,
 }
@@ -52,13 +54,23 @@ fn get_config(state: State<AppState>) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-fn run_full_scan(state: State<AppState>, password_samples: Vec<String>) -> Result<FullScanResult, String> {
+fn save_config(state: State<AppState>, config: AppConfig) -> Result<String, String> {
+    config
+        .save(&state.app_dir)
+        .map_err(|e| format!("Could not save config: {}", e))?;
+    let mut current = state.config.write().map_err(|e| e.to_string())?;
+    *current = config;
+    Ok("Configuration saved".to_string())
+}
+
+#[tauri::command]
+fn run_full_scan(state: State<AppState>) -> Result<FullScanResult, String> {
     let config = state.config.read().map_err(|e| e.to_string())?.clone();
 
-    let integrity = scanner::run_system_integrity_scan(&config);
+    let integrity = scanner::run_system_integrity_scan(&config, &state.data_dir);
     let behavioral = behavior::run_behavioral_detection(&config);
     let (network_report, connections, map_nodes) = network::run_network_scan();
-    let human = human_risk::run_human_risk_monitor(&config, password_samples);
+    let human = human_risk::run_human_risk_monitor();
 
     let reports = vec![integrity, behavioral, network_report, human];
     let dashboard = build_dashboard(&reports, connections.len());
@@ -326,12 +338,15 @@ fn main() {
         .manage(AppState {
             db: Mutex::new(db),
             config: RwLock::new(config),
+            app_dir,
+            data_dir,
             last_scan_at: Mutex::new(None),
             latest_map: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
             get_version,
             get_config,
+            save_config,
             run_full_scan,
             get_network_live,
             get_dashboard_snapshot,

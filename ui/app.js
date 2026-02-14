@@ -3,6 +3,7 @@
 const state = {
   lastReports: [],
   mapNodes: [],
+  config: null,
 };
 
 const els = {
@@ -17,6 +18,9 @@ const els = {
   logRows: document.getElementById("logRows"),
   responseOutput: document.getElementById("responseOutput"),
   mapCanvas: document.getElementById("mapCanvas"),
+  cpuThresholdInput: document.getElementById("cpuThresholdInput"),
+  memoryThresholdInput: document.getElementById("memoryThresholdInput"),
+  dryRunInput: document.getElementById("dryRunInput"),
 };
 
 bindNavigation();
@@ -32,6 +36,7 @@ async function boot() {
   try {
     const version = await invoke("get_version");
     els.versionBadge.textContent = `v${version.string}`;
+    await loadConfig();
     await refreshDashboard();
     await refreshLive();
     await refreshLogs();
@@ -54,8 +59,7 @@ function bindNavigation() {
 function bindActions() {
   document.getElementById("scanBtn").addEventListener("click", async () => {
     setStatus("Vollscan gestartet...");
-    const passwordSamples = ["Passwort123", "S3curePass!2026", "admin"];
-    const res = await invoke("run_full_scan", { passwordSamples });
+    const res = await invoke("run_full_scan");
     state.lastReports = res.reports;
     applyDashboard(res.dashboard);
     renderFindings(res.reports);
@@ -78,23 +82,39 @@ function bindActions() {
 
   document.getElementById("isolateBtn").addEventListener("click", async () => {
     const pid = Number(document.getElementById("pidInput").value);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      setStatus("Bitte gültige PID eingeben.");
+      return;
+    }
+    if (!window.confirm(`Prozess ${pid} wirklich isolieren?`)) return;
     const res = await invoke("isolate_process_cmd", { pid });
     printResponse(res);
   });
 
   document.getElementById("blockIpBtn").addEventListener("click", async () => {
     const ip = document.getElementById("ipInput").value.trim();
+    if (!ip) {
+      setStatus("Bitte IP eingeben.");
+      return;
+    }
+    if (!window.confirm(`IP ${ip} temporär blockieren?`)) return;
     const res = await invoke("block_ip_cmd", { ip, minutes: 30 });
     printResponse(res);
   });
 
   document.getElementById("quarantineBtn").addEventListener("click", async () => {
     const path = document.getElementById("fileInput").value.trim();
+    if (!path) {
+      setStatus("Bitte Dateipfad eingeben.");
+      return;
+    }
+    if (!window.confirm(`Datei in Quarantäne verschieben?\n${path}`)) return;
     const res = await invoke("quarantine_file_cmd", { path });
     printResponse(res);
   });
 
   document.getElementById("rollbackBtn").addEventListener("click", async () => {
+    if (!window.confirm("Registry-Rollback ausführen?")) return;
     const res = await invoke("rollback_registry_cmd");
     printResponse(res);
   });
@@ -117,7 +137,11 @@ function bindActions() {
     setStatus(msg);
   });
 
+  document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
+  document.getElementById("reloadSettingsBtn").addEventListener("click", loadConfig);
+
   setInterval(refreshLive, 9000);
+  setInterval(refreshDashboard, 15000);
 }
 
 async function refreshDashboard() {
@@ -213,4 +237,37 @@ function drawMap() {
 
 function setStatus(msg) {
   els.statusBar.textContent = msg;
+}
+
+async function loadConfig() {
+  const config = await invoke("get_config");
+  state.config = config;
+  els.cpuThresholdInput.value = String(Math.round(config.cpu_alert_threshold));
+  els.memoryThresholdInput.value = String(Math.round(config.memory_alert_threshold));
+  els.dryRunInput.checked = !!config.dry_run_response;
+}
+
+async function saveSettings() {
+  if (!state.config) {
+    setStatus("Konfiguration ist noch nicht geladen.");
+    return;
+  }
+
+  const cpu = Number(els.cpuThresholdInput.value);
+  const memory = Number(els.memoryThresholdInput.value);
+  if (!Number.isFinite(cpu) || !Number.isFinite(memory) || cpu < 20 || cpu > 95 || memory < 20 || memory > 95) {
+    setStatus("Thresholds müssen zwischen 20 und 95 liegen.");
+    return;
+  }
+
+  const next = {
+    ...state.config,
+    cpu_alert_threshold: cpu,
+    memory_alert_threshold: memory,
+    dry_run_response: !!els.dryRunInput.checked,
+  };
+
+  const msg = await invoke("save_config", { config: next });
+  state.config = next;
+  setStatus(msg);
 }
