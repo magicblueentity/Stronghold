@@ -1,0 +1,111 @@
+﻿<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ANCORATE STRONGHOLD</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ANCORATE SECURITY SUITE</p>
+        <h1>STRONGHOLD</h1>
+      </div>
+      <div class="version" id="versionBadge">v26.1.1</div>
+    </header>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+      <button class="nav-btn" data-view="live">Live Monitor</button>
+      <button class="nav-btn" data-view="threat">Threat Center</button>
+      <button class="nav-btn" data-view="health">System Health</button>
+      <button class="nav-btn" data-view="logs">Logs</button>
+    </nav>
+
+    <main>
+      <section class="view active" id="view-dashboard">
+        <div class="card score-card">
+          <h2>Sicherheits-Score</h2>
+          <div class="score-wrap">
+            <div class="score-circle" id="scoreCircle">--</div>
+            <div>
+              <p>Status: <span id="riskStatus">-</span></p>
+              <p>Aktive Bedrohungen: <strong id="activeThreats">0</strong></p>
+              <p>Netzwerkverbindungen: <strong id="networkConnections">0</strong></p>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="scanBtn">Vollscan starten</button>
+            <button id="seedBtn">Beispiel-Logs laden</button>
+            <button id="snapshotBtn">Snapshot</button>
+          </div>
+        </div>
+
+        <div class="card map-card">
+          <h2>Interaktive Netzwerk-Map</h2>
+          <canvas id="mapCanvas" width="920" height="320"></canvas>
+        </div>
+      </section>
+
+      <section class="view" id="view-live">
+        <div class="card">
+          <h2>Live Netzwerk-Feed</h2>
+          <table>
+            <thead>
+              <tr><th>Proto</th><th>Lokal</th><th>Remote</th><th>Status</th><th>PID</th></tr>
+            </thead>
+            <tbody id="connectionRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="view" id="view-threat">
+        <div class="card">
+          <h2>Threat Center</h2>
+          <div class="inline-actions">
+            <input type="number" id="pidInput" placeholder="PID" />
+            <button id="isolateBtn">Prozess isolieren</button>
+            <input type="text" id="ipInput" placeholder="IP" />
+            <button id="blockIpBtn">IP 30 Min blockieren</button>
+          </div>
+          <div class="inline-actions">
+            <input type="text" id="fileInput" placeholder="Pfad zur Datei" />
+            <button id="quarantineBtn">Datei quarantänen</button>
+            <button id="rollbackBtn">Registry Rollback</button>
+          </div>
+          <pre id="responseOutput"></pre>
+        </div>
+      </section>
+
+      <section class="view" id="view-health">
+        <div class="card">
+          <h2>System Health Findings</h2>
+          <div id="findingsList"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-logs">
+        <div class="card">
+          <h2>Threat Logs</h2>
+          <div class="inline-actions">
+            <button id="refreshLogsBtn">Aktualisieren</button>
+            <button id="exportCsvBtn">Export CSV</button>
+            <button id="exportJsonBtn">Export JSON</button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Zeit</th><th>Modul</th><th>Severity</th><th>Event</th><th>Summary</th></tr>
+            </thead>
+            <tbody id="logRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer id="statusBar">Bereit.</footer>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+﻿# Build outputs
+src-tauri/target/
+stronghold_data/
+
+# local config
+appsettings.json
+
+# node
+node_modules/

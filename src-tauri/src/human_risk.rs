@@ -85,10 +85,11 @@ fn check_weak_passwords(config: &AppConfig, samples: Vec<String>) -> Vec<ModuleF
 }
 
 fn mask(value: &str) -> String {
-    if value.len() < 3 {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() < 3 {
         return "***".to_string();
     }
-    format!("{}***{}", &value[0..1], &value[value.len() - 1..])
+    format!("{}***{}", chars[0], chars[chars.len() - 1])
 }
 
 fn score_from_findings(start: i16, findings: &[ModuleFinding]) -> u8 {
