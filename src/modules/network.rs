@@ -1,4 +1,6 @@
-use crate::models::{ConnectionEntry, NetworkReport, RiskLevel, ThreatItem};
+use crate::models::{
+    ConnectionEntry, ModuleId, NetworkAnomaly, NetworkReport, RiskLevel, ThreatItem, ThreatKind,
+};
 use regex::Regex;
 use std::process::Command;
 
@@ -17,8 +19,10 @@ pub fn run_scan() -> NetworkReport {
     let mut threats = Vec::new();
     if !dns_anomalies.is_empty() {
         threats.push(ThreatItem {
-            source: "Network".to_string(),
-            summary: format!("{} DNS/connection anomalies detected", dns_anomalies.len()),
+            source: ModuleId::Network,
+            kind: ThreatKind::DnsOrConnectionAnomalies {
+                count: dns_anomalies.len(),
+            },
             risk: RiskLevel::Red,
         });
     }
@@ -76,7 +80,7 @@ fn normalize_state(raw: &str) -> String {
     }
 }
 
-fn detect_dns_anomalies(connections: &[ConnectionEntry]) -> Vec<String> {
+fn detect_dns_anomalies(connections: &[ConnectionEntry]) -> Vec<NetworkAnomaly> {
     let mut anomalies = Vec::new();
     for c in connections {
         let is_dns = c.remote.ends_with(":53") || c.local.ends_with(":53");
@@ -84,22 +88,20 @@ fn detect_dns_anomalies(connections: &[ConnectionEntry]) -> Vec<String> {
         let unknown_remote = c.remote.starts_with("0.0.0.0") || c.remote.starts_with("[::]");
 
         if is_dns && c.state == "ESTABLISHED" {
-            anomalies.push(format!(
-                "Unusual established DNS flow: {} -> {}",
-                c.local, c.remote
-            ));
+            anomalies.push(NetworkAnomaly::UnusualEstablishedDnsFlow {
+                local: c.local.clone(),
+                remote: c.remote.clone(),
+            });
         }
         if suspicious_port {
-            anomalies.push(format!(
-                "Potential discovery abuse port usage: {}",
-                c.remote
-            ));
+            anomalies.push(NetworkAnomaly::DiscoveryPortUsage {
+                remote: c.remote.clone(),
+            });
         }
         if unknown_remote && c.state == "ESTABLISHED" {
-            anomalies.push(format!(
-                "Established connection to unspecified endpoint: {}",
-                c.remote
-            ));
+            anomalies.push(NetworkAnomaly::EstablishedToUnspecifiedEndpoint {
+                remote: c.remote.clone(),
+            });
         }
     }
     anomalies

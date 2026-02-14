@@ -116,9 +116,9 @@ pub fn run_auto_response_cycle(
     let self_pid = std::process::id();
 
     for pid in behavior
-        .suspicious_pids
+        .suspicious_processes
         .iter()
-        .copied()
+        .map(|p| p.pid)
         .take(config.max_auto_isolations_per_cycle)
     {
         if pid == self_pid || seen_pids.contains(&pid) {
@@ -133,7 +133,7 @@ pub fn run_auto_response_cycle(
 
     let mut candidates = Vec::new();
     candidates.extend(behavior.file_anomalies.iter().cloned());
-    candidates.extend(human_risk.unsafe_downloads.iter().cloned());
+    candidates.extend(human_risk.unsafe_downloads.iter().map(|f| f.path.clone()));
 
     let mut quarantined = 0usize;
     for file in candidates {

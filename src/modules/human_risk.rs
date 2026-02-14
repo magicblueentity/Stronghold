@@ -1,6 +1,8 @@
 use crate::{
     config::AppConfig,
-    models::{HumanRiskReport, RiskLevel, ThreatItem},
+    models::{
+        FileFinding, HumanRiskReport, ModuleId, RiskLevel, RiskyAction, ThreatItem, ThreatKind,
+    },
 };
 use std::{
     fs,
@@ -15,27 +17,29 @@ pub fn run_scan(config: &AppConfig) -> HumanRiskReport {
     let risky_actions = detect_risky_actions(&unsafe_downloads, &weak_password_accounts);
 
     let mut score: i32 = 100;
-    score -= (unsafe_downloads.len() as i32) * 10;
-    score -= (weak_password_accounts.len() as i32) * 12;
-    score -= (risky_actions.len() as i32) * 8;
+    let penalty_downloads = ((unsafe_downloads.len() as i32) * 2).min(60);
+    let penalty_weak = ((weak_password_accounts.len() as i32) * 15).min(40);
+    let penalty_actions = (risky_actions.len() as i32) * 5;
+    score -= penalty_downloads + penalty_weak + penalty_actions;
     let score = score.clamp(0, 100) as u8;
     let risk_level = RiskLevel::from_score(score);
 
     let mut threats = Vec::new();
     if !unsafe_downloads.is_empty() {
         threats.push(ThreatItem {
-            source: "HumanRisk".to_string(),
-            summary: format!("{} potentially unsafe downloads", unsafe_downloads.len()),
+            source: ModuleId::HumanRisk,
+            kind: ThreatKind::UnsafeDownloads {
+                count: unsafe_downloads.len(),
+            },
             risk: RiskLevel::Yellow,
         });
     }
     if !weak_password_accounts.is_empty() {
         threats.push(ThreatItem {
-            source: "HumanRisk".to_string(),
-            summary: format!(
-                "{} users flagged for weak password policy",
-                weak_password_accounts.len()
-            ),
+            source: ModuleId::HumanRisk,
+            kind: ThreatKind::WeakPasswordPolicy {
+                count: weak_password_accounts.len(),
+            },
             risk: RiskLevel::Red,
         });
     }
@@ -50,7 +54,7 @@ pub fn run_scan(config: &AppConfig) -> HumanRiskReport {
     }
 }
 
-fn detect_unsafe_downloads() -> Vec<String> {
+fn detect_unsafe_downloads() -> Vec<FileFinding> {
     let mut findings = Vec::new();
     let cutoff = SystemTime::now()
         .checked_sub(Duration::from_secs(60 * 60 * 24 * 30))
@@ -64,10 +68,8 @@ fn detect_unsafe_downloads() -> Vec<String> {
         for entry in entries.flatten().take(500) {
             let path = entry.path();
             let metadata = entry.metadata().ok();
-            let is_recent = metadata
-                .and_then(|m| m.modified().ok())
-                .map(|m| m >= cutoff)
-                .unwrap_or(false);
+            let modified = metadata.and_then(|m| m.modified().ok());
+            let is_recent = modified.map(|m| m >= cutoff).unwrap_or(false);
 
             if !is_recent {
                 continue;
@@ -75,7 +77,11 @@ fn detect_unsafe_downloads() -> Vec<String> {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 let ext = ext.to_ascii_lowercase();
                 if matches!(ext.as_str(), "exe" | "msi" | "bat" | "scr" | "ps1") {
-                    findings.push(path.display().to_string());
+                    let modified = modified.map(chrono::DateTime::<chrono::Local>::from);
+                    findings.push(FileFinding {
+                        path: path.display().to_string(),
+                        modified,
+                    });
                 }
             }
         }
@@ -97,13 +103,20 @@ fn detect_weak_accounts_from_policy(config: &AppConfig) -> Vec<String> {
         .collect()
 }
 
-fn detect_risky_actions(unsafe_downloads: &[String], weak_accounts: &[String]) -> Vec<String> {
+fn detect_risky_actions(
+    unsafe_downloads: &[FileFinding],
+    weak_accounts: &[String],
+) -> Vec<RiskyAction> {
     let mut actions = Vec::new();
     if !unsafe_downloads.is_empty() {
-        actions.push("Downloaded executable files from user download directory".to_string());
+        actions.push(RiskyAction::RecentExecutableDownloads {
+            count: unsafe_downloads.len(),
+        });
     }
     if !weak_accounts.is_empty() {
-        actions.push("Account set includes weak-password flagged users".to_string());
+        actions.push(RiskyAction::WeakPasswordAccountsPresent {
+            count: weak_accounts.len(),
+        });
     }
 
     let admin_output = Command::new("net")
@@ -112,12 +125,12 @@ fn detect_risky_actions(unsafe_downloads: &[String], weak_accounts: &[String]) -
     if let Ok(out) = admin_output {
         let admin_text = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
         if admin_text.contains("guest") {
-            actions.push("Guest account appears in local Administrators group".to_string());
+            actions.push(RiskyAction::GuestInAdministratorsGroup);
         }
     }
 
     if unsafe_downloads.len() + weak_accounts.len() >= 4 {
-        actions.push("User behavior profile exceeds risk threshold".to_string());
+        actions.push(RiskyAction::HighRiskProfile);
     }
     actions
 }

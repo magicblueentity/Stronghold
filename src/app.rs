@@ -1,7 +1,10 @@
 use crate::{
     config::AppConfig,
     engine,
-    i18n::{tr, Language},
+    i18n::{
+        module_label, network_anomaly_text, risk_level_label, risky_action_text, tr,
+        Language,
+    },
     logger::AppLogger,
     models::*,
     modules::{kernel, response},
@@ -84,7 +87,7 @@ impl StrongholdApp {
             last_dashboard,
             isolate_pid_input: String::new(),
             quarantine_path_input: String::new(),
-            status_message: "Ready".to_string(),
+            status_message: tr(language, "Ready", "Bereit").to_string(),
             kernel_state,
             last_scan_at: now,
             next_auto_scan_at: now + Duration::from_secs(180),
@@ -102,7 +105,11 @@ impl StrongholdApp {
             let _ = app.logger.log(&format!("Scan summary write failed: {e}"));
         }
         app.schedule_next_auto_scan();
-        app.push_event("Stronghold initialized");
+        app.push_event(tr(
+            language,
+            "Stronghold initialized",
+            "Stronghold initialisiert",
+        ));
         app
     }
 
@@ -131,7 +138,13 @@ impl StrongholdApp {
             &self.config.scan_summary_path,
             &engine::build_summary(&full_scan),
         ) {
-            self.push_event(format!("Scan summary write failed: {e}"));
+            let msg = match self.language {
+                Language::En => format!("Scan summary write failed: {e}"),
+                Language::De => {
+                    format!("Scan-Zusammenfassung konnte nicht geschrieben werden: {e}")
+                }
+            };
+            self.push_event(msg);
         }
 
         self.integrity_report = full_scan.integrity;
@@ -151,10 +164,23 @@ impl StrongholdApp {
         }
 
         let duration_ms = started.elapsed().as_millis();
-        self.status_message = format!(
-            "{} scan completed in {} ms (score {})",
-            trigger, duration_ms, self.last_dashboard.security_score
-        );
+        let prefix = match (trigger, self.language) {
+            ("Manual", Language::En) => "Manual scan completed",
+            ("Manual", Language::De) => "Manueller Scan abgeschlossen",
+            ("Automatic", Language::En) => "Automatic scan completed",
+            ("Automatic", Language::De) => "Automatischer Scan abgeschlossen",
+            _ => "Scan completed",
+        };
+        self.status_message = match self.language {
+            Language::En => format!(
+                "{prefix} in {duration_ms} ms (score {})",
+                self.last_dashboard.security_score
+            ),
+            Language::De => format!(
+                "{prefix} in {duration_ms} ms (Wert {})",
+                self.last_dashboard.security_score
+            ),
+        };
         self.push_event(self.status_message.clone());
     }
 
@@ -206,10 +232,17 @@ impl StrongholdApp {
             "auto-cycle".to_string(),
             self.last_dashboard.security_score,
         );
-        self.push_event(format!(
-            "Automation executed {} response actions",
-            outcome.action_count
-        ));
+        let msg = match self.language {
+            Language::En => format!(
+                "Automation executed {} response actions",
+                outcome.action_count
+            ),
+            Language::De => format!(
+                "Automatisierung fuehrte {} Aktionen aus",
+                outcome.action_count
+            ),
+        };
+        self.push_event(msg);
     }
 
     fn persist_incident_history(
@@ -237,6 +270,126 @@ impl StrongholdApp {
         });
         writeln!(file, "{}", serde_json::to_string(&payload)?)?;
         Ok(())
+    }
+
+    fn action_isolate_pid(&mut self, pid: u32, trigger: &str) {
+        match response::isolate_process(pid) {
+            Ok(_) => {
+                if !self.response_report.isolated_processes.contains(&pid) {
+                    self.response_report.isolated_processes.push(pid);
+                }
+                self.status_message = match self.language {
+                    Language::En => format!("Process isolated: {pid}"),
+                    Language::De => format!("Prozess isoliert: {pid}"),
+                };
+                self.push_event(self.status_message.clone());
+                let incident = response::AutoResponseOutcome {
+                    isolated_pids: vec![pid],
+                    action_count: 1,
+                    ..Default::default()
+                };
+                let _ = self.persist_incident_history(
+                    &incident,
+                    trigger.to_string(),
+                    self.last_dashboard.security_score,
+                );
+            }
+            Err(e) => {
+                self.status_message = match self.language {
+                    Language::En => format!("Isolation failed: {e}"),
+                    Language::De => format!("Isolation fehlgeschlagen: {e}"),
+                };
+                self.push_event(self.status_message.clone());
+            }
+        }
+    }
+
+    fn action_quarantine_file(&mut self, file: &str, trigger: &str) {
+        match response::quarantine_file(file, &self.config.quarantine_dir) {
+            Ok(path) => {
+                if !self.response_report.quarantined_files.contains(&path) {
+                    self.response_report.quarantined_files.push(path.clone());
+                }
+                self.status_message = match self.language {
+                    Language::En => format!("File quarantined: {path}"),
+                    Language::De => format!("Datei quarantiniert: {path}"),
+                };
+                self.push_event(self.status_message.clone());
+                let incident = response::AutoResponseOutcome {
+                    quarantined_paths: vec![path],
+                    action_count: 1,
+                    ..Default::default()
+                };
+                let _ = self.persist_incident_history(
+                    &incident,
+                    trigger.to_string(),
+                    self.last_dashboard.security_score,
+                );
+            }
+            Err(e) => {
+                self.status_message = match self.language {
+                    Language::En => format!("Quarantine failed: {e}"),
+                    Language::De => format!("Quarantaene fehlgeschlagen: {e}"),
+                };
+                self.push_event(self.status_message.clone());
+            }
+        }
+    }
+
+    fn action_revert_registry(&mut self, trigger: &str) {
+        self.response_report.reverted_registry_entries = response::revert_registry_changes();
+        let count = self.response_report.reverted_registry_entries.len();
+        self.status_message = match self.language {
+            Language::En => format!("Registry entries reverted: {count}"),
+            Language::De => format!("Registry-Eintraege zurueckgesetzt: {count}"),
+        };
+        self.push_event(self.status_message.clone());
+
+        if count > 0 {
+            let incident = response::AutoResponseOutcome {
+                reverted_registry_entries: self.response_report.reverted_registry_entries.clone(),
+                action_count: 1,
+                ..Default::default()
+            };
+            let _ = self.persist_incident_history(
+                &incident,
+                trigger.to_string(),
+                self.last_dashboard.security_score,
+            );
+        }
+    }
+
+    fn action_create_snapshot(&mut self, trigger: &str) {
+        let snapshot = "logs/system_snapshot.json";
+        match response::create_system_snapshot(snapshot) {
+            Ok(path) => {
+                self.response_report.snapshot_file = Some(path.clone());
+                self.status_message = tr(
+                    self.language,
+                    "System snapshot created",
+                    "System-Snapshot erstellt",
+                )
+                .to_string();
+                self.push_event(self.status_message.clone());
+                let incident = response::AutoResponseOutcome {
+                    snapshot_file: Some(path),
+                    action_count: 1,
+                    ..Default::default()
+                };
+                let _ = self.persist_incident_history(
+                    &incident,
+                    trigger.to_string(),
+                    self.last_dashboard.security_score,
+                );
+            }
+            Err(e) => {
+                self.status_message = match self.language {
+                    Language::En => format!("Snapshot failed: {e}"),
+                    Language::De => format!("Snapshot fehlgeschlagen: {e}"),
+                };
+                self.push_event(self.status_message.clone());
+            }
+        }
     }
 
     fn automation_tick(&mut self) {
@@ -268,7 +421,7 @@ impl StrongholdApp {
 
     fn automation_label(&self) -> String {
         if !self.config.auto_scan_enabled {
-            return "AUTO: OFF".to_string();
+            return tr(self.language, "AUTO: OFF", "AUTO: AUS").to_string();
         }
         let seconds = self
             .next_auto_scan_at
@@ -293,7 +446,14 @@ impl eframe::App for StrongholdApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("STRONGHOLD").size(22.0).strong());
-                    ui.label(RichText::new("NATIVE SECURITY CORE").color(Color32::from_gray(170)));
+                    ui.label(
+                        RichText::new(tr(
+                            self.language,
+                            "NATIVE SECURITY CORE",
+                            "NATIVE SICHERHEITS-KERN",
+                        ))
+                        .color(Color32::from_gray(170)),
+                    );
                     ui.separator();
 
                     if ui
@@ -321,8 +481,12 @@ impl eframe::App for StrongholdApp {
                     ui.colored_label(auto_color, self.automation_label());
                     ui.separator();
                     ui.label(
-                        RichText::new(format!("Status: {}", self.status_message))
-                            .color(Color32::from_gray(170)),
+                        RichText::new(format!(
+                            "{}: {}",
+                            tr(self.language, "Status", "Status"),
+                            self.status_message
+                        ))
+                        .color(Color32::from_gray(170)),
                     );
                 });
             });
@@ -338,22 +502,73 @@ impl eframe::App for StrongholdApp {
             .show(ctx, |ui| {
                 ui.label(RichText::new(tr(self.language, "Modules", "Module")).strong());
                 ui.add_space(6.0);
-                nav_button(ui, &mut self.tab, Tab::Dashboard, "Dashboard");
-                nav_button(ui, &mut self.tab, Tab::Integrity, "System Integrity");
-                nav_button(ui, &mut self.tab, Tab::Behavior, "Behavior Detection");
-                nav_button(ui, &mut self.tab, Tab::Network, "Network Intelligence");
-                nav_button(ui, &mut self.tab, Tab::HumanRisk, "Human Risk");
-                nav_button(ui, &mut self.tab, Tab::Response, "Response Engine");
-                nav_button(ui, &mut self.tab, Tab::Kernel, "Kernel Control");
-                nav_button(ui, &mut self.tab, Tab::Settings, "Settings");
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Dashboard,
+                    tr(self.language, "Dashboard", "Dashboard"),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Integrity,
+                    module_label(self.language, ModuleId::Integrity),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Behavior,
+                    module_label(self.language, ModuleId::Behavior),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Network,
+                    module_label(self.language, ModuleId::Network),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::HumanRisk,
+                    module_label(self.language, ModuleId::HumanRisk),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Response,
+                    module_label(self.language, ModuleId::Response),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Kernel,
+                    module_label(self.language, ModuleId::Kernel),
+                );
+                nav_button(
+                    ui,
+                    &mut self.tab,
+                    Tab::Settings,
+                    tr(self.language, "Settings", "Einstellungen"),
+                );
 
                 ui.add_space(12.0);
                 ui.separator();
-                ui.label(RichText::new("Automation").strong());
-                ui.label(format!("Scan runs: {}", self.scan_runs));
-                ui.label(format!("Auto actions: {}", self.auto_actions_total));
+                ui.label(
+                    RichText::new(tr(self.language, "Automation", "Automatisierung")).strong(),
+                );
                 ui.label(format!(
-                    "Uptime: {}s",
+                    "{}: {}",
+                    tr(self.language, "Scan runs", "Scan-Laeufe"),
+                    self.scan_runs
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(self.language, "Auto actions", "Auto-Aktionen"),
+                    self.auto_actions_total
+                ));
+                ui.label(format!(
+                    "{}: {}s",
+                    tr(self.language, "Uptime", "Laufzeit"),
                     self.boot_instant.elapsed().as_secs()
                 ));
             });
@@ -454,37 +669,48 @@ fn metric_card(ui: &mut egui::Ui, title: &str, value: &str, accent: Color32) {
 
 fn render_dashboard(ui: &mut egui::Ui, app: &StrongholdApp) {
     let accent = StrongholdApp::risk_color(app.last_dashboard.risk_level);
-    ui.heading(RichText::new("Command Center").size(26.0));
+    ui.heading(RichText::new(tr(app.language, "Command Center", "Kommandozentrale")).size(26.0));
 
     ui.columns(2, |columns| {
-        glass_card(&mut columns[0], "Security Gauge", accent, |ui| {
-            draw_score_gauge(ui, app.last_dashboard.security_score, accent);
-            ui.label(format!(
-                "Risk level: {}",
-                app.last_dashboard.risk_level.as_str()
-            ));
-        });
+        glass_card(
+            &mut columns[0],
+            tr(app.language, "Security Gauge", "Sicherheitsanzeige"),
+            accent,
+            |ui| {
+                draw_score_gauge(
+                    ui,
+                    app.last_dashboard.security_score,
+                    accent,
+                    tr(app.language, "SECURITY", "SICHERHEIT"),
+                );
+                ui.label(format!(
+                    "{}: {}",
+                    tr(app.language, "Risk level", "Risikostufe"),
+                    risk_level_label(app.language, app.last_dashboard.risk_level)
+                ));
+            },
+        );
 
         glass_card(
             &mut columns[1],
-            "Live Metrics",
+            tr(app.language, "Live Metrics", "Live-Metriken"),
             Color32::from_rgb(80, 160, 230),
             |ui| {
                 metric_card(
                     ui,
-                    "Active Threats",
+                    tr(app.language, "Active Threats", "Aktive Bedrohungen"),
                     &app.last_dashboard.active_threats.to_string(),
                     accent,
                 );
                 metric_card(
                     ui,
-                    "Connections",
+                    tr(app.language, "Connections", "Verbindungen"),
                     &app.last_dashboard.network_connections.to_string(),
                     Color32::from_rgb(80, 160, 230),
                 );
                 metric_card(
                     ui,
-                    "Last Scan",
+                    tr(app.language, "Last Scan", "Letzter Scan"),
                     &app.last_dashboard.last_scan.format("%H:%M:%S").to_string(),
                     Color32::from_rgb(130, 140, 170),
                 );
@@ -495,7 +721,7 @@ fn render_dashboard(ui: &mut egui::Ui, app: &StrongholdApp) {
     ui.add_space(8.0);
     glass_card(
         ui,
-        "Automation Feed",
+        tr(app.language, "Automation Feed", "Aktivitaets-Feed"),
         Color32::from_rgb(100, 180, 250),
         |ui| {
             egui::ScrollArea::vertical()
@@ -509,7 +735,7 @@ fn render_dashboard(ui: &mut egui::Ui, app: &StrongholdApp) {
     );
 }
 
-fn draw_score_gauge(ui: &mut egui::Ui, score: u8, accent: Color32) {
+fn draw_score_gauge(ui: &mut egui::Ui, score: u8, accent: Color32, label: &str) {
     let (rect, _) =
         ui.allocate_exact_size(vec2(ui.available_width().min(320.0), 220.0), Sense::hover());
     let painter = ui.painter_at(rect);
@@ -546,7 +772,7 @@ fn draw_score_gauge(ui: &mut egui::Ui, score: u8, accent: Color32) {
     painter.text(
         egui::pos2(center.x, center.y + 30.0),
         Align2::CENTER_CENTER,
-        "SECURITY",
+        label,
         FontId::proportional(12.0),
         Color32::from_gray(190),
     );
@@ -555,374 +781,672 @@ fn draw_score_gauge(ui: &mut egui::Ui, score: u8, accent: Color32) {
 fn render_integrity(ui: &mut egui::Ui, app: &StrongholdApp) {
     let r = &app.integrity_report;
     let accent = StrongholdApp::risk_color(r.risk_level);
-    glass_card(ui, "System Integrity Scanner", accent, |ui| {
-        ui.label(format!("Score: {} ({})", r.score, r.risk_level.as_str()));
-        ui.label(format!("Running processes: {}", r.running_processes));
-        ui.label(format!("Startup items: {}", r.startup_items));
-        ui.separator();
-        ui.label("Missing critical files:");
-        egui::ScrollArea::vertical()
-            .max_height(280.0)
-            .show(ui, |ui| {
-                if r.missing_critical_files.is_empty() {
-                    ui.colored_label(Color32::from_rgb(20, 198, 124), "No critical files missing");
-                } else {
-                    for f in &r.missing_critical_files {
-                        ui.label(format!("- {f}"));
+    glass_card(
+        ui,
+        tr(
+            app.language,
+            "System Integrity Scanner",
+            "Systemintegritaets-Scan",
+        ),
+        accent,
+        |ui| {
+            ui.label(format!(
+                "{}: {} ({})",
+                tr(app.language, "Score", "Wert"),
+                r.score,
+                risk_level_label(app.language, r.risk_level)
+            ));
+            ui.label(format!(
+                "{}: {}",
+                tr(app.language, "Running processes", "Laufende Prozesse"),
+                r.running_processes
+            ));
+            ui.label(format!(
+                "{}: {}",
+                tr(app.language, "Startup items", "Autostart-Eintraege"),
+                r.startup_items
+            ));
+            ui.separator();
+            ui.label(tr(
+                app.language,
+                "Missing critical files:",
+                "Fehlende kritische Dateien:",
+            ));
+            egui::ScrollArea::vertical()
+                .max_height(280.0)
+                .show(ui, |ui| {
+                    if r.missing_critical_files.is_empty() {
+                        ui.colored_label(
+                            Color32::from_rgb(20, 198, 124),
+                            tr(
+                                app.language,
+                                "No critical files missing",
+                                "Keine kritischen Dateien fehlen",
+                            ),
+                        );
+                    } else {
+                        for f in &r.missing_critical_files {
+                            ui.label(format!("- {f}"));
+                        }
                     }
-                }
-            });
-    });
+                });
+        },
+    );
 }
 
-fn render_behavior(ui: &mut egui::Ui, app: &StrongholdApp) {
-    let r = &app.behavior_report;
-    let accent = StrongholdApp::risk_color(r.risk_level);
-    glass_card(ui, "Behavioral Threat Detection", accent, |ui| {
-        ui.label(format!("Score: {} ({})", r.score, r.risk_level.as_str()));
-        ui.label(format!(
-            "High CPU patterns: {}",
-            r.suspicious_processes.len()
-        ));
-        ui.label(format!(
-            "High memory patterns: {}",
-            r.high_memory_processes.len()
-        ));
-        ui.label(format!("Suspicious PIDs: {}", r.suspicious_pids.len()));
-        ui.label(format!("File anomalies: {}", r.file_anomalies.len()));
+fn render_behavior(ui: &mut egui::Ui, app: &mut StrongholdApp) {
+    let lang = app.language;
+    let report = app.behavior_report.clone();
+    let accent = StrongholdApp::risk_color(report.risk_level);
 
-        ui.separator();
-        ui.label("Top suspicious processes:");
-        for proc_line in r.suspicious_processes.iter().take(8) {
-            ui.label(format!("- {proc_line}"));
-        }
-    });
+    glass_card(
+        ui,
+        tr(
+            lang,
+            "Behavioral Threat Detection",
+            "Verhaltensbasierte Erkennung",
+        ),
+        accent,
+        |ui| {
+            ui.label(format!(
+                "{}: {} ({})",
+                tr(lang, "Score", "Wert"),
+                report.score,
+                risk_level_label(lang, report.risk_level)
+            ));
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, "High CPU processes", "Prozesse mit hoher CPU"),
+                    report.suspicious_processes.len()
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, "High memory processes", "Prozesse mit hohem RAM"),
+                    report.high_memory_processes.len()
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, "File anomalies", "Datei-Anomalien"),
+                    report.file_anomalies.len()
+                ));
+            });
+
+            ui.separator();
+            ui.label(RichText::new(tr(lang, "High CPU", "Hohe CPU")).strong());
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("behavior_cpu_grid")
+                        .striped(true)
+                        .min_col_width(40.0)
+                        .show(ui, |ui| {
+                            ui.label(tr(lang, "PID", "PID"));
+                            ui.label(tr(lang, "Name", "Name"));
+                            ui.label(tr(lang, "CPU", "CPU"));
+                            ui.label(tr(lang, "RAM", "RAM"));
+                            ui.label("");
+                            ui.end_row();
+
+                            for p in report.suspicious_processes.iter().take(60) {
+                                ui.label(p.pid.to_string());
+                                ui.label(&p.name);
+                                ui.label(format!("{:.1}%", p.cpu_percent));
+                                ui.label(format!("{} MB", p.memory_mb));
+                                if ui.button(tr(lang, "Isolate", "Isolieren")).clicked() {
+                                    app.action_isolate_pid(p.pid, "ui-behavior-isolate");
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+
+            ui.add_space(10.0);
+            ui.label(RichText::new(tr(lang, "High memory", "Hoher RAM")).strong());
+            egui::ScrollArea::vertical()
+                .max_height(180.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("behavior_mem_grid")
+                        .striped(true)
+                        .min_col_width(40.0)
+                        .show(ui, |ui| {
+                            ui.label(tr(lang, "PID", "PID"));
+                            ui.label(tr(lang, "Name", "Name"));
+                            ui.label(tr(lang, "RAM", "RAM"));
+                            ui.end_row();
+
+                            for p in report.high_memory_processes.iter().take(50) {
+                                ui.label(p.pid.to_string());
+                                ui.label(&p.name);
+                                ui.label(format!("{} MB", p.memory_mb));
+                                ui.end_row();
+                            }
+                        });
+                });
+
+            if !report.file_anomalies.is_empty() {
+                ui.add_space(10.0);
+                ui.separator();
+                ui.label(RichText::new(tr(lang, "File anomalies", "Datei-Anomalien")).strong());
+                egui::ScrollArea::vertical()
+                    .max_height(160.0)
+                    .show(ui, |ui| {
+                        for path in report.file_anomalies.iter().take(40) {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(path);
+                                if ui.button(tr(lang, "Quarantine", "Quarantaene")).clicked() {
+                                    app.action_quarantine_file(path, "ui-behavior-quarantine");
+                                }
+                            });
+                        }
+                    });
+            }
+        },
+    );
 }
 
 fn render_network(ui: &mut egui::Ui, app: &StrongholdApp) {
     let r = &app.network_report;
     let accent = StrongholdApp::risk_color(r.risk_level);
-    glass_card(ui, "Network Surveillance Layer", accent, |ui| {
-        ui.label(format!("Score: {} ({})", r.score, r.risk_level.as_str()));
-        ui.label(format!(
-            "Active connections: {}",
-            r.active_connections.len()
-        ));
-        ui.label(format!("DNS anomalies: {}", r.dns_anomalies.len()));
-        ui.separator();
+    glass_card(
+        ui,
+        tr(
+            app.language,
+            "Network Surveillance Layer",
+            "Netzwerk-Ueberwachung",
+        ),
+        accent,
+        |ui| {
+            ui.label(format!(
+                "{}: {} ({})",
+                tr(app.language, "Score", "Wert"),
+                r.score,
+                risk_level_label(app.language, r.risk_level)
+            ));
+            ui.label(format!(
+                "{}: {}",
+                tr(app.language, "Active connections", "Aktive Verbindungen"),
+                r.active_connections.len()
+            ));
+            ui.label(format!(
+                "{}: {}",
+                tr(app.language, "Network anomalies", "Netzwerk-Anomalien"),
+                r.dns_anomalies.len()
+            ));
 
-        let desired = vec2(ui.available_width(), 230.0);
-        let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
-        let painter = ui.painter_at(rect);
-        painter.rect_stroke(
-            rect,
-            6.0,
-            Stroke::new(1.0, Color32::from_rgb(45, 65, 95)),
-            StrokeKind::Outside,
-        );
-
-        let center = rect.center();
-        painter.circle_filled(center, 17.0, Color32::from_rgb(20, 198, 124));
-        painter.text(
-            center,
-            Align2::CENTER_CENTER,
-            "HOST",
-            FontId::proportional(12.0),
-            Color32::BLACK,
-        );
-
-        for (i, conn) in r.active_connections.iter().take(36).enumerate() {
-            let angle = (i as f32 / 36.0) * std::f32::consts::TAU;
-            let radius = 72.0 + (i % 4) as f32 * 15.0;
-            let node = egui::pos2(
-                center.x + radius * angle.cos(),
-                center.y + radius * angle.sin(),
-            );
-            let rc = if conn.state == "ESTABLISHED" {
-                Color32::from_rgb(80, 160, 230)
-            } else {
-                Color32::from_rgb(140, 145, 165)
-            };
-            painter.line_segment([center, node], Stroke::new(1.0, rc));
-            painter.circle_filled(node, 4.0, rc);
-        }
-
-        ui.separator();
-        egui::ScrollArea::vertical()
-            .max_height(220.0)
-            .show(ui, |ui| {
-                for conn in r.active_connections.iter().take(80) {
-                    ui.label(format!(
-                        "{} {} -> {} [{}] pid={:?}",
-                        conn.protocol, conn.local, conn.remote, conn.state, conn.pid
-                    ));
+            if !r.dns_anomalies.is_empty() {
+                ui.separator();
+                ui.label(
+                    RichText::new(tr(app.language, "Anomalies", "Anomalien"))
+                        .strong()
+                        .color(accent),
+                );
+                for a in r.dns_anomalies.iter().take(10) {
+                    ui.label(format!("- {}", network_anomaly_text(app.language, a)));
                 }
-            });
-    });
+            }
+            ui.separator();
+
+            let desired = vec2(ui.available_width(), 230.0);
+            let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+            let painter = ui.painter_at(rect);
+            painter.rect_stroke(
+                rect,
+                6.0,
+                Stroke::new(1.0, Color32::from_rgb(45, 65, 95)),
+                StrokeKind::Outside,
+            );
+
+            let center = rect.center();
+            painter.circle_filled(center, 17.0, Color32::from_rgb(20, 198, 124));
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                "HOST",
+                FontId::proportional(12.0),
+                Color32::BLACK,
+            );
+
+            for (i, conn) in r.active_connections.iter().take(36).enumerate() {
+                let angle = (i as f32 / 36.0) * std::f32::consts::TAU;
+                let radius = 72.0 + (i % 4) as f32 * 15.0;
+                let node = egui::pos2(
+                    center.x + radius * angle.cos(),
+                    center.y + radius * angle.sin(),
+                );
+                let rc = if conn.state == "ESTABLISHED" {
+                    Color32::from_rgb(80, 160, 230)
+                } else {
+                    Color32::from_rgb(140, 145, 165)
+                };
+                painter.line_segment([center, node], Stroke::new(1.0, rc));
+                painter.circle_filled(node, 4.0, rc);
+            }
+
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for conn in r.active_connections.iter().take(80) {
+                        ui.label(format!(
+                            "{} {} -> {} [{}] pid={:?}",
+                            conn.protocol, conn.local, conn.remote, conn.state, conn.pid
+                        ));
+                    }
+                });
+        },
+    );
 }
 
-fn render_human_risk(ui: &mut egui::Ui, app: &StrongholdApp) {
-    let r = &app.human_risk_report;
-    let accent = StrongholdApp::risk_color(r.risk_level);
-    glass_card(ui, "Human Risk Monitor", accent, |ui| {
-        ui.label(format!("Score: {} ({})", r.score, r.risk_level.as_str()));
-        ui.label(format!("Unsafe downloads: {}", r.unsafe_downloads.len()));
-        ui.label(format!(
-            "Weak-password accounts: {}",
-            r.weak_password_accounts.len()
-        ));
-        ui.label(format!("Risk actions: {}", r.risky_actions.len()));
+fn render_human_risk(ui: &mut egui::Ui, app: &mut StrongholdApp) {
+    let lang = app.language;
+    let report = app.human_risk_report.clone();
+    let accent = StrongholdApp::risk_color(report.risk_level);
 
-        ui.separator();
-        ui.label("Risk actions detected:");
-        for entry in r.risky_actions.iter().take(10) {
-            ui.label(format!("- {entry}"));
-        }
-    });
+    glass_card(
+        ui,
+        tr(lang, "Human Risk Monitor", "Menschliches Risiko"),
+        accent,
+        |ui| {
+            ui.label(format!(
+                "{}: {} ({})",
+                tr(lang, "Score", "Wert"),
+                report.score,
+                risk_level_label(lang, report.risk_level)
+            ));
+
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, "Unsafe downloads", "Unsichere Downloads"),
+                    report.unsafe_downloads.len()
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, "Weak-password accounts", "Schwache-Passwort-Accounts"),
+                    report.weak_password_accounts.len()
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    tr(lang, "Risk actions", "Risiko-Aktionen"),
+                    report.risky_actions.len()
+                ));
+            });
+
+            ui.separator();
+            ui.label(
+                RichText::new(tr(
+                    lang,
+                    "Risk actions detected",
+                    "Erkannte Risiko-Aktionen",
+                ))
+                .strong(),
+            );
+            for action in report.risky_actions.iter().take(10) {
+                ui.label(format!("- {}", risky_action_text(lang, action)));
+            }
+
+            if !report.weak_password_accounts.is_empty() {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.label(RichText::new(tr(lang, "Weak accounts", "Schwache Accounts")).strong());
+                for acc in report.weak_password_accounts.iter().take(20) {
+                    ui.label(format!("- {acc}"));
+                }
+            }
+
+            if !report.unsafe_downloads.is_empty() {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.label(
+                    RichText::new(tr(
+                        lang,
+                        "Recent executable downloads",
+                        "Aktuelle EXE/MSI Downloads",
+                    ))
+                    .strong(),
+                );
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        for f in report.unsafe_downloads.iter().take(30) {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(&f.path);
+                                if ui.button(tr(lang, "Quarantine", "Quarantaene")).clicked() {
+                                    app.action_quarantine_file(&f.path, "ui-humanrisk-quarantine");
+                                }
+                            });
+                            if let Some(modified) = f.modified {
+                                ui.label(format!(
+                                    "  {}: {}",
+                                    tr(lang, "Modified", "Geaendert"),
+                                    modified.format("%Y-%m-%d %H:%M")
+                                ));
+                            }
+                        }
+                    });
+            }
+        },
+    );
 }
 
 fn render_response(ui: &mut egui::Ui, app: &mut StrongholdApp) {
+    let lang = app.language;
     glass_card(
         ui,
-        "Isolation & Response Engine",
+        tr(lang, "Isolation & Response Engine", "Isolation & Reaktion"),
         Color32::from_rgb(240, 130, 75),
         |ui| {
             ui.horizontal(|ui| {
-                ui.label("PID");
+                ui.label(tr(lang, "PID", "PID"));
                 ui.text_edit_singleline(&mut app.isolate_pid_input);
-                if ui.button("Isolate Process").clicked() {
+                if ui
+                    .button(tr(lang, "Isolate process", "Prozess isolieren"))
+                    .clicked()
+                {
                     match app.isolate_pid_input.trim().parse::<u32>() {
-                        Ok(pid) => match response::isolate_process(pid) {
-                            Ok(_) => {
-                                app.response_report.isolated_processes.push(pid);
-                                app.status_message = format!("Process isolated: {pid}");
-                                app.push_event(app.status_message.clone());
-                                let incident = response::AutoResponseOutcome {
-                                    isolated_pids: vec![pid],
-                                    action_count: 1,
-                                    ..Default::default()
-                                };
-                                let _ = app.persist_incident_history(
-                                    &incident,
-                                    "manual-isolate".to_string(),
-                                    app.last_dashboard.security_score,
-                                );
-                            }
-                            Err(e) => app.status_message = format!("Isolation failed: {e}"),
-                        },
-                        Err(_) => app.status_message = "Invalid PID".to_string(),
+                        Ok(pid) => app.action_isolate_pid(pid, "manual-isolate"),
+                        Err(_) => {
+                            app.status_message =
+                                tr(lang, "Invalid PID", "Ungueltige PID").to_string();
+                            app.push_event(app.status_message.clone());
+                        }
                     }
                 }
             });
 
             ui.horizontal(|ui| {
-                ui.label("File");
+                ui.label(tr(lang, "File", "Datei"));
                 ui.text_edit_singleline(&mut app.quarantine_path_input);
-                if ui.button("Quarantine File").clicked() {
-                    match response::quarantine_file(
-                        app.quarantine_path_input.trim(),
-                        &app.config.quarantine_dir,
-                    ) {
-                        Ok(path) => {
-                            app.response_report.quarantined_files.push(path.clone());
-                            app.status_message = format!("File quarantined: {path}");
-                            app.push_event(app.status_message.clone());
-                            let incident = response::AutoResponseOutcome {
-                                quarantined_paths: vec![path],
-                                action_count: 1,
-                                ..Default::default()
-                            };
-                            let _ = app.persist_incident_history(
-                                &incident,
-                                "manual-quarantine".to_string(),
-                                app.last_dashboard.security_score,
-                            );
-                        }
-                        Err(e) => app.status_message = format!("Quarantine failed: {e}"),
+                if ui
+                    .button(tr(lang, "Quarantine file", "Datei quarantinieren"))
+                    .clicked()
+                {
+                    let path = app.quarantine_path_input.trim().to_string();
+                    if path.is_empty() {
+                        app.status_message =
+                            tr(lang, "No file path provided", "Kein Dateipfad angegeben")
+                                .to_string();
+                        app.push_event(app.status_message.clone());
+                    } else {
+                        app.action_quarantine_file(&path, "manual-quarantine");
                     }
                 }
             });
 
             ui.horizontal(|ui| {
-                if ui.button("Revert Registry Changes").clicked() {
-                    app.response_report.reverted_registry_entries =
-                        response::revert_registry_changes();
-                    let revert_count = app.response_report.reverted_registry_entries.len();
-                    app.status_message = format!("Registry entries reverted: {}", revert_count);
-                    app.push_event(app.status_message.clone());
-                    if revert_count > 0 {
-                        let incident = response::AutoResponseOutcome {
-                            reverted_registry_entries: app
-                                .response_report
-                                .reverted_registry_entries
-                                .clone(),
-                            action_count: 1,
-                            ..Default::default()
-                        };
-                        let _ = app.persist_incident_history(
-                            &incident,
-                            "manual-registry-revert".to_string(),
-                            app.last_dashboard.security_score,
-                        );
-                    }
+                if ui
+                    .button(tr(
+                        lang,
+                        "Revert registry changes",
+                        "Registry zuruecksetzen",
+                    ))
+                    .clicked()
+                {
+                    app.action_revert_registry("manual-registry-revert");
                 }
 
-                if ui.button("Create System Snapshot").clicked() {
-                    let snapshot = "logs/system_snapshot.json";
-                    match response::create_system_snapshot(snapshot) {
-                        Ok(path) => {
-                            app.response_report.snapshot_file = Some(path.clone());
-                            app.status_message = "System snapshot created".to_string();
-                            app.push_event(app.status_message.clone());
-                            let incident = response::AutoResponseOutcome {
-                                snapshot_file: Some(path),
-                                action_count: 1,
-                                ..Default::default()
-                            };
-                            let _ = app.persist_incident_history(
-                                &incident,
-                                "manual-snapshot".to_string(),
-                                app.last_dashboard.security_score,
-                            );
-                        }
-                        Err(e) => app.status_message = format!("Snapshot failed: {e}"),
-                    }
+                if ui
+                    .button(tr(
+                        lang,
+                        "Create system snapshot",
+                        "System-Snapshot erstellen",
+                    ))
+                    .clicked()
+                {
+                    app.action_create_snapshot("manual-snapshot");
                 }
             });
 
             ui.separator();
             ui.label(format!(
-                "Isolated processes: {}",
+                "{}: {}",
+                tr(lang, "Isolated processes", "Isolierte Prozesse"),
                 app.response_report.isolated_processes.len()
             ));
             ui.label(format!(
-                "Quarantined files: {}",
+                "{}: {}",
+                tr(lang, "Quarantined files", "Quarantinierte Dateien"),
                 app.response_report.quarantined_files.len()
             ));
             ui.label(format!(
-                "Registry entries reverted: {}",
+                "{}: {}",
+                tr(
+                    lang,
+                    "Registry entries reverted",
+                    "Registry-Eintraege zurueckgesetzt"
+                ),
                 app.response_report.reverted_registry_entries.len()
             ));
             if let Some(snapshot) = &app.response_report.snapshot_file {
-                ui.label(format!("Snapshot: {snapshot}"));
+                ui.label(format!("{}: {snapshot}", tr(lang, "Snapshot", "Snapshot")));
             }
         },
     );
 }
 
 fn render_kernel(ui: &mut egui::Ui, app: &mut StrongholdApp) {
+    let lang = app.language;
     let accent = StrongholdApp::kernel_color(app.kernel_state);
-    glass_card(ui, "Kernel Control Plane", accent, |ui| {
-        let label = match app.kernel_state {
-            kernel::KernelServiceState::Running => "Running",
-            kernel::KernelServiceState::Stopped => "Stopped",
-            kernel::KernelServiceState::Missing => "Missing",
-            kernel::KernelServiceState::Unknown => "Unknown",
-        };
+    glass_card(
+        ui,
+        tr(lang, "Kernel Control Plane", "Kernel-Kontrollpanel"),
+        accent,
+        |ui| {
+            let label = match app.kernel_state {
+                kernel::KernelServiceState::Running => tr(lang, "Running", "Laeuft"),
+                kernel::KernelServiceState::Stopped => tr(lang, "Stopped", "Gestoppt"),
+                kernel::KernelServiceState::Missing => tr(lang, "Missing", "Fehlt"),
+                kernel::KernelServiceState::Unknown => tr(lang, "Unknown", "Unbekannt"),
+            };
 
-        ui.colored_label(
-            accent,
-            format!("Service {}: {label}", app.config.kernel_service_name),
-        );
+            ui.colored_label(
+                accent,
+                format!(
+                    "{} {}: {label}",
+                    tr(lang, "Service", "Service"),
+                    app.config.kernel_service_name
+                ),
+            );
 
-        ui.horizontal(|ui| {
-            if ui.button("Refresh State").clicked() {
-                app.kernel_state = kernel::query_service_state(&app.config.kernel_service_name)
-                    .unwrap_or(kernel::KernelServiceState::Unknown);
-            }
-            if ui.button("Start Service").clicked() {
-                match kernel::start_service(&app.config.kernel_service_name) {
-                    Ok(_) => {
-                        app.status_message = "Kernel service start requested".to_string();
-                        app.push_event(app.status_message.clone());
-                        app.kernel_state =
-                            kernel::query_service_state(&app.config.kernel_service_name)
-                                .unwrap_or(kernel::KernelServiceState::Unknown);
-                    }
-                    Err(e) => app.status_message = format!("Failed to start service: {e}"),
+            ui.horizontal(|ui| {
+                if ui
+                    .button(tr(lang, "Refresh state", "Status aktualisieren"))
+                    .clicked()
+                {
+                    app.kernel_state = kernel::query_service_state(&app.config.kernel_service_name)
+                        .unwrap_or(kernel::KernelServiceState::Unknown);
                 }
-            }
-        });
+                if ui
+                    .button(tr(lang, "Start service", "Service starten"))
+                    .clicked()
+                {
+                    match kernel::start_service(&app.config.kernel_service_name) {
+                        Ok(_) => {
+                            app.status_message = tr(
+                                lang,
+                                "Kernel service start requested",
+                                "Kernel-Service Start angefordert",
+                            )
+                            .to_string();
+                            app.push_event(app.status_message.clone());
+                            app.kernel_state =
+                                kernel::query_service_state(&app.config.kernel_service_name)
+                                    .unwrap_or(kernel::KernelServiceState::Unknown);
+                        }
+                        Err(e) => {
+                            app.status_message = match lang {
+                                Language::En => format!("Failed to start service: {e}"),
+                                Language::De => {
+                                    format!("Service konnte nicht gestartet werden: {e}")
+                                }
+                            }
+                        }
+                    }
+                }
+            });
 
-        ui.separator();
-        ui.label("Kernel driver enforcement requires a signed Windows driver package.");
-        ui.label("Stronghold controls and monitors the configured kernel service from user mode.");
-    });
+            ui.separator();
+            ui.label(tr(
+                lang,
+                "Kernel driver enforcement requires a signed Windows driver package.",
+                "Kernel-Treiber erfordern ein signiertes Windows-Treiberpaket.",
+            ));
+            ui.label(tr(
+                lang,
+                "Stronghold controls and monitors the configured kernel service from user mode.",
+                "Stronghold steuert und ueberwacht den Kernel-Service im User-Mode.",
+            ));
+        },
+    );
 }
 
 fn render_settings(ui: &mut egui::Ui, app: &mut StrongholdApp) {
-    glass_card(ui, "Settings", Color32::from_rgb(100, 170, 240), |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Language");
-            ui.text_edit_singleline(&mut app.config.default_language);
-        });
-
-        ui.add(
-            egui::Slider::new(&mut app.config.cpu_alert_percent, 10.0..=100.0).text("CPU alert %"),
-        );
-        ui.add(
-            egui::Slider::new(&mut app.config.memory_alert_mb, 128..=32768).text("Memory alert MB"),
-        );
-
-        ui.horizontal(|ui| {
-            ui.label("Quarantine dir");
-            ui.text_edit_singleline(&mut app.config.quarantine_dir);
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Kernel service");
-            ui.text_edit_singleline(&mut app.config.kernel_service_name);
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Scan history file");
-            ui.text_edit_singleline(&mut app.config.scan_history_path);
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Scan summary file");
-            ui.text_edit_singleline(&mut app.config.scan_summary_path);
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Incident history file");
-            ui.text_edit_singleline(&mut app.config.incident_history_path);
-        });
-
-        ui.separator();
-        ui.checkbox(&mut app.config.auto_scan_enabled, "Enable automatic scans");
-        ui.add(
-            egui::Slider::new(
-                &mut app.config.auto_scan_interval_seconds,
-                MIN_AUTO_SCAN_SECONDS..=3600,
-            )
-            .text("Auto scan interval (seconds)"),
-        );
-
-        ui.checkbox(
-            &mut app.config.auto_response_enabled,
-            "Enable automatic response actions",
-        );
-        ui.add(
-            egui::Slider::new(&mut app.config.max_auto_isolations_per_cycle, 0..=10)
-                .text("Auto isolate max / cycle"),
-        );
-        ui.add(
-            egui::Slider::new(&mut app.config.max_auto_quarantines_per_cycle, 0..=10)
-                .text("Auto quarantine max / cycle"),
-        );
-
-        ui.checkbox(&mut app.config.enable_ai_module, "Enable local AI module");
-
-        if ui.button("Save Settings").clicked() {
-            match app.config.save(CONFIG_PATH) {
-                Ok(_) => {
-                    app.status_message = "Settings saved".to_string();
-                    app.schedule_next_auto_scan();
-                    app.push_event("Settings updated");
+    let lang = app.language;
+    glass_card(
+        ui,
+        tr(lang, "Settings", "Einstellungen"),
+        Color32::from_rgb(100, 170, 240),
+        |ui| {
+            ui.label(RichText::new(tr(lang, "General", "Allgemein")).strong());
+            ui.horizontal(|ui| {
+                ui.label(tr(lang, "Language", "Sprache"));
+                if ui
+                    .radio_value(&mut app.language, Language::En, "English")
+                    .clicked()
+                {
+                    app.config.default_language = "en".to_string();
                 }
-                Err(e) => app.status_message = format!("Failed to save settings: {e}"),
+                if ui
+                    .radio_value(&mut app.language, Language::De, "Deutsch")
+                    .clicked()
+                {
+                    app.config.default_language = "de".to_string();
+                }
+            });
+
+            ui.add(
+                egui::Slider::new(&mut app.config.cpu_alert_percent, 10.0..=100.0).text(tr(
+                    lang,
+                    "CPU alert (%)",
+                    "CPU Warnung (%)",
+                )),
+            );
+            ui.add(
+                egui::Slider::new(&mut app.config.memory_alert_mb, 128..=32768).text(tr(
+                    lang,
+                    "Memory alert (MB)",
+                    "RAM Warnung (MB)",
+                )),
+            );
+
+            ui.horizontal(|ui| {
+                ui.label(tr(lang, "Quarantine directory", "Quarantaene-Ordner"));
+                ui.text_edit_singleline(&mut app.config.quarantine_dir);
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(tr(lang, "Kernel service name", "Kernel-Service Name"));
+                ui.text_edit_singleline(&mut app.config.kernel_service_name);
+            });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(RichText::new(tr(lang, "Logging", "Logging")).strong());
+            ui.horizontal(|ui| {
+                ui.label(tr(lang, "Scan history file", "Scan-History Datei"));
+                ui.text_edit_singleline(&mut app.config.scan_history_path);
+            });
+            ui.horizontal(|ui| {
+                ui.label(tr(lang, "Scan summary file", "Scan-Summary Datei"));
+                ui.text_edit_singleline(&mut app.config.scan_summary_path);
+            });
+            ui.horizontal(|ui| {
+                ui.label(tr(lang, "Incident history file", "Incident-History Datei"));
+                ui.text_edit_singleline(&mut app.config.incident_history_path);
+            });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(RichText::new(tr(lang, "Automation", "Automatisierung")).strong());
+            ui.checkbox(
+                &mut app.config.auto_scan_enabled,
+                tr(
+                    lang,
+                    "Enable automatic scans",
+                    "Automatische Scans aktivieren",
+                ),
+            );
+            ui.add(
+                egui::Slider::new(
+                    &mut app.config.auto_scan_interval_seconds,
+                    MIN_AUTO_SCAN_SECONDS..=3600,
+                )
+                .text(tr(
+                    lang,
+                    "Auto scan interval (seconds)",
+                    "Auto-Scan Intervall (Sekunden)",
+                )),
+            );
+
+            ui.checkbox(
+                &mut app.config.auto_response_enabled,
+                tr(
+                    lang,
+                    "Enable automatic response actions",
+                    "Automatische Reaktionsaktionen aktivieren",
+                ),
+            );
+            ui.add(
+                egui::Slider::new(&mut app.config.max_auto_isolations_per_cycle, 0..=10).text(tr(
+                    lang,
+                    "Auto isolate max / cycle",
+                    "Auto-Isolation max / Zyklus",
+                )),
+            );
+            ui.add(
+                egui::Slider::new(&mut app.config.max_auto_quarantines_per_cycle, 0..=10).text(tr(
+                    lang,
+                    "Auto quarantine max / cycle",
+                    "Auto-Quarantaene max / Zyklus",
+                )),
+            );
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(RichText::new(tr(lang, "AI", "KI")).strong());
+            ui.checkbox(
+                &mut app.config.enable_ai_module,
+                tr(
+                    lang,
+                    "Enable local AI module",
+                    "Lokales KI-Modul aktivieren",
+                ),
+            );
+
+            ui.add_space(10.0);
+            if ui
+                .button(tr(lang, "Save settings", "Einstellungen speichern"))
+                .clicked()
+            {
+                match app.config.save(CONFIG_PATH) {
+                    Ok(_) => {
+                        app.status_message =
+                            tr(lang, "Settings saved", "Einstellungen gespeichert").to_string();
+                        app.schedule_next_auto_scan();
+                        app.push_event(tr(lang, "Settings updated", "Einstellungen aktualisiert"));
+                    }
+                    Err(e) => {
+                        app.status_message = match lang {
+                            Language::En => format!("Failed to save settings: {e}"),
+                            Language::De => {
+                                format!("Einstellungen konnten nicht gespeichert werden: {e}")
+                            }
+                        }
+                    }
+                }
             }
-        }
-    });
+        },
+    );
 }

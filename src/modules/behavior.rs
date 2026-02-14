@@ -1,6 +1,6 @@
 use crate::{
     config::AppConfig,
-    models::{BehaviorReport, RiskLevel, ThreatItem},
+    models::{BehaviorReport, ModuleId, ProcessFinding, RiskLevel, ThreatItem, ThreatKind},
     modules::ai,
 };
 use std::{fs, path::Path};
@@ -11,18 +11,30 @@ pub fn run_scan(config: &AppConfig) -> BehaviorReport {
     system.refresh_all();
 
     let mut suspicious_processes = Vec::new();
-    let mut suspicious_pids = Vec::new();
     let mut high_memory_processes = Vec::new();
 
     for (pid, process) in system.processes() {
         let name = process.name().to_string_lossy().to_string();
-        if process.cpu_usage() >= config.cpu_alert_percent {
-            suspicious_processes.push(format!("{name} (CPU {:.1}%)", process.cpu_usage()));
-            suspicious_pids.push(pid.as_u32());
-        }
+        let exe = process
+            .exe()
+            .and_then(|p| p.to_str())
+            .map(|s| s.to_string());
+        let cpu = process.cpu_usage();
         let memory_mb = process.memory() / (1024 * 1024);
+
+        let finding = ProcessFinding {
+            pid: pid.as_u32(),
+            name,
+            exe,
+            cpu_percent: cpu,
+            memory_mb,
+        };
+
+        if cpu >= config.cpu_alert_percent {
+            suspicious_processes.push(finding.clone());
+        }
         if memory_mb >= config.memory_alert_mb {
-            high_memory_processes.push(format!("{name} ({memory_mb} MB)"));
+            high_memory_processes.push(finding);
         }
     }
 
@@ -50,18 +62,19 @@ pub fn run_scan(config: &AppConfig) -> BehaviorReport {
     let mut threats = Vec::new();
     if !suspicious_processes.is_empty() {
         threats.push(ThreatItem {
-            source: "Behavior".to_string(),
-            summary: format!("{} high-CPU process patterns", suspicious_processes.len()),
+            source: ModuleId::Behavior,
+            kind: ThreatKind::HighCpuProcesses {
+                count: suspicious_processes.len(),
+            },
             risk: RiskLevel::Yellow,
         });
     }
     if !file_anomalies.is_empty() {
         threats.push(ThreatItem {
-            source: "Behavior".to_string(),
-            summary: format!(
-                "{} suspicious executable files in temp folders",
-                file_anomalies.len()
-            ),
+            source: ModuleId::Behavior,
+            kind: ThreatKind::TempExecutables {
+                count: file_anomalies.len(),
+            },
             risk: RiskLevel::Red,
         });
     }
@@ -70,7 +83,6 @@ pub fn run_scan(config: &AppConfig) -> BehaviorReport {
         score,
         risk_level,
         suspicious_processes,
-        suspicious_pids,
         high_memory_processes,
         file_anomalies,
         threats,

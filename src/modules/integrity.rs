@@ -1,6 +1,6 @@
 use crate::{
     config::AppConfig,
-    models::{IntegrityReport, RiskLevel, ThreatItem},
+    models::{IntegrityReport, ModuleId, RiskLevel, ThreatItem, ThreatKind},
 };
 use std::{fs, path::Path, process::Command};
 use sysinfo::System;
@@ -28,15 +28,19 @@ pub fn run_scan(config: &AppConfig) -> IntegrityReport {
     let mut threats = Vec::new();
     if !missing_critical_files.is_empty() {
         threats.push(ThreatItem {
-            source: "Integrity".to_string(),
-            summary: format!("{} critical files missing", missing_critical_files.len()),
+            source: ModuleId::Integrity,
+            kind: ThreatKind::MissingCriticalFiles {
+                count: missing_critical_files.len(),
+            },
             risk: RiskLevel::Red,
         });
     }
     if startup_items > 30 {
         threats.push(ThreatItem {
-            source: "Integrity".to_string(),
-            summary: format!("High number of startup items: {startup_items}"),
+            source: ModuleId::Integrity,
+            kind: ThreatKind::HighStartupItems {
+                count: startup_items,
+            },
             risk: RiskLevel::Yellow,
         });
     }
