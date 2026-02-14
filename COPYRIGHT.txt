@@ -1,0 +1,6 @@
+﻿Copyright (c) 2026 Samuel J. Tirwa
+All rights reserved.
+
+This software and associated documentation files (the "Software") are protected by copyright law.
+No part of the Software may be reproduced, distributed, or transmitted in any form or by any means
+without the prior written permission of the copyright holder.

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub quarantine_dir: PathBuf,
     pub allowed_quarantine_roots: Vec<PathBuf>,
@@ -14,12 +15,15 @@ pub struct AppConfig {
     pub dry_run_response: bool,
     pub suspicious_processes: Vec<String>,
     pub weak_password_patterns: Vec<String>,
+    pub preferred_language: String,
+    pub auto_scan_on_start: bool,
+    pub first_run_completed: bool,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         let program_data = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        let quarantine_dir = program_data.join("ANCORATE").join("Stronghold").join("quarantine");
+        let quarantine_dir = program_data.join("Stronghold").join("quarantine");
         let mut allowed_roots = Vec::new();
         if let Some(downloads) = dirs::download_dir() {
             allowed_roots.push(downloads);
@@ -61,6 +65,9 @@ impl Default for AppConfig {
                 "qwerty".to_string(),
                 "admin".to_string(),
             ],
+            preferred_language: "de".to_string(),
+            auto_scan_on_start: false,
+            first_run_completed: false,
         }
     }
 }
@@ -73,6 +80,9 @@ impl AppConfig {
             let mut parsed = serde_json::from_str::<Self>(&raw)?;
             if parsed.allowed_quarantine_roots.is_empty() {
                 parsed.allowed_quarantine_roots = Self::default().allowed_quarantine_roots;
+            }
+            if parsed.preferred_language.trim().is_empty() {
+                parsed.preferred_language = "de".to_string();
             }
             fs::create_dir_all(&parsed.quarantine_dir)?;
             return Ok(parsed);

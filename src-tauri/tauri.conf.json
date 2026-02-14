@@ -1,15 +1,15 @@
 ﻿{
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ANCORATE STRONGHOLD",
+  "productName": "Stronghold",
   "version": "26.1.1",
-  "identifier": "com.ancorate.stronghold",
+  "identifier": "com.stronghold.desktop",
   "build": {
     "frontendDist": "../ui"
   },
   "app": {
     "windows": [
       {
-        "title": "ANCORATE STRONGHOLD",
+        "title": "Stronghold",
         "width": 1420,
         "height": 900,
         "resizable": true,

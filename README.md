@@ -1,132 +1,51 @@
-﻿# STRONGHOLD (v26.1.1)
+﻿# Stronghold (v26.1.1)
 
-Lokale Desktop-Sicherheitsanwendung fuer Windows mit Rust-Core, Tauri-UI, SQLite-Logging und optionalem Python-Anomalie-Scoring.
+Desktop-Sicherheitsanwendung fuer Windows mit Rust-Core, Tauri-UI, SQLite und optionalem Python-ML-Modul.
 
-## Architektur
+Copyright 2026 by Samuel J. Tirwa.
 
-* `src-tauri/`: Rust-Core (Scanner, Detection, Response, DB, Tauri Commands)
-* `ui/`: Desktop-Frontend (Dashboard, Live Monitor, Threat Center, Logs)
-* `stronghold\_data/`: lokale SQLite DB + Exporte (wird beim Start erzeugt)
-* `sample\_data/`: Testdaten fuer Threat-History und Exporte
-* `ml/`: optionale Python-Komponente fuer Anomalie-Erkennung
+## Neu
 
-## Module
+- Rebranding auf **Stronghold**
+- Mehrsprachigkeit: Deutsch und Englisch
+- First-Run Setup Wizard beim ersten Start
+- Persistente Settings in `appsettings.json`
+- Auto-Scan beim Start (optional)
+- Gehaertete Response-Aktionen (PID/IP/Quarantaene-Validierung)
 
-1. System Integrity Scanner
+## Build & Run
 
-* Prozess-Heuristiken gegen bekannte Angriffs-Tools
-* Pruefung kritischer Dateien
-* Registry-Checks (Run/Winlogon)
-* Startup-Item-Heuristiken
+1. `npm install`
+2. Optional: `Copy-Item .\appsettings.example.json .\appsettings.json`
+3. `npm run tauri:dev`
+4. `npm run tauri:build`
 
-2. Behavioral Threat Detection
+## Setup beim ersten Start
 
-* CPU/RAM-Anomalien (global + pro Prozess)
-* Erkennung schneller Veraenderungen in Startup-Pfaden
-* Modul-Risiko-Score
+Der Setup-Dialog konfiguriert:
+- Sprache (`de`/`en`)
+- CPU-/RAM-Thresholds
+- Dry-Run-Modus
+- Auto-Scan beim Start
 
-3. Network Surveillance Layer
+Danach wird `first_run_completed = true` gespeichert.
 
-* Live-Connections via `netstat -ano`
-* Port- und DNS-Heuristiken
-* Interaktive Netzwerk-Map (lokale Pseudo-Geokoordinaten)
-* Temporaeres IP-Blocking (Firewall), standardmaessig `dry\_run`
+## Einstellungen
 
-4. Human Risk Monitor
+Unter `Settings` in der App:
+- Sprache wechseln
+- Thresholds anpassen
+- Dry-Run aktivieren/deaktivieren
+- Auto-Scan beim Start setzen
 
-* Unsichere Downloads im Download-Ordner
-* Schwache Passwortmuster
-* Empfehlungen via Findings
+## Lokale Daten
 
-5. Isolation \& Response Engine
-
-* Prozess-Isolation (Stop-Process)
-* Datei-Quarantaene
-* Registry-Rollback (Dry-Run/Platzhalter)
-* Lokale Snapshots in SQLite
-
-## Sicherheitsprinzipien
-
-* Vollstaendig lokal, keine Cloud-Abhaengigkeit
-* Sensible Aktionen standardmaessig im `dry\_run\_response` Modus
-* Persistente und exportierbare Threat-History (JSON/CSV)
-
-## Voraussetzungen
-
-* Windows 10/11
-* Rust Toolchain (stable)
-* Node.js 20+
-* Visual Studio Build Tools fuer Rust/Tauri auf Windows
-
-## Build \& Run (Schritt fuer Schritt)
-
-1. Projektabhaengigkeiten installieren:
-
-```powershell
-npm install
-```
-
-2. Optional: Beispielkonfiguration aktivieren:
-
-```powershell
-Copy-Item .\\appsettings.example.json .\\appsettings.json
-```
-
-3. Entwicklungsstart:
-
-```powershell
-npm run tauri:dev
-```
-
-4. Produktion bauen:
-
-```powershell
-npm run tauri:build
-```
-
-5. Logs exportieren (in der UI):
-
-* `Threat Logs` -> `Export CSV` oder `Export JSON`
-* Zielpfade: `stronghold\_data/threat\_export.csv` und `stronghold\_data/threat\_export.json`
-
-## Beispielkonfiguration
-
-Datei: `appsettings.example.json`
-
-Wichtige Parameter:
-
-* `dry\_run\_response`: true/false
-* `cpu\_alert\_threshold`
-* `memory\_alert\_threshold`
-* `suspicious\_processes`
-* `weak\_password\_patterns`
-
-## Sample Threat-Logs
-
-* JSON: `sample\_data/threat\_logs.json`
-* CSV: `sample\_data/threat\_logs.csv`
-* In-App Seed: Dashboard -> `Beispiel-Logs laden`
+- Konfiguration: `appsettings.json`
+- Datenbank/Export/Baselines: `stronghold_data/`
+- Sample Logs: `sample_data/`
 
 ## Optionales ML-Modul
 
-Anomalie-Scoring lokal ausfuehren:
-
 ```powershell
-python .\\ml\\anomaly\_detector.py
+python .\ml\anomaly_detector.py
 ```
-
-Ausgabe:
-
-* Input: `sample\_data/telemetry.json` (wird bei Bedarf erzeugt)
-* Output: `sample\_data/anomaly\_scores.json`
-
-## Versionierung
-
-Schema: `Major.Minor.Patch`
-
-* Major = Jahr (z. B. 26)
-* Minor = Features/Stabilitaet
-* Patch = Bugfixes
-
-Aktuelle Version: `26.1.1`
-

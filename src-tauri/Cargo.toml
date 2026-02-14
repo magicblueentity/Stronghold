@@ -1,8 +1,8 @@
 ﻿[package]
-name = "ancorate-stronghold"
+name = "stronghold"
 version = "26.1.1"
-description = "ANCORATE STRONGHOLD desktop security suite"
-authors = ["ANCORATE"]
+description = "Stronghold desktop security suite"
+authors = ["Samuel J. Tirwa"]
 license = "Proprietary"
 repository = ""
 edition = "2021"

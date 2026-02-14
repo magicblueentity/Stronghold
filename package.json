@@ -1,8 +1,8 @@
 ﻿{
-  "name": "ancorate-stronghold",
+  "name": "stronghold",
   "version": "26.1.1",
   "private": true,
-  "description": "ANCORATE STRONGHOLD desktop security platform",
+  "description": "Stronghold desktop security platform",
   "scripts": {
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
