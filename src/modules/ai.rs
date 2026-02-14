@@ -14,7 +14,10 @@ pub fn anomaly_score(
         "{} {} {}",
         suspicious_process_count, high_memory_count, file_anomaly_count
     );
-    let output = Command::new("python").args([script, &payload]).output().ok()?;
+    let output = Command::new("python")
+        .args([script, &payload])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

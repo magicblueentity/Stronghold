@@ -1,48 +1,37 @@
 # Stronghold
 
-Stronghold is a fully native Rust desktop security application for Windows.
-This repository has been migrated from a hybrid HTML/JS/Tauri/Electron prototype to a Rust-only desktop architecture using `eframe/egui`.
+Stronghold is a native Rust desktop security workstation for Windows.
+It was migrated from a hybrid HTML/JS prototype to a Rust-only application with local/offline operation.
 
-## Features
+## What is implemented now
 
-- System Integrity Scanner
-  - Process inventory
-  - Critical file presence checks
-  - Startup item inspection
-  - Security score generation
-- Behavioral Threat Detection
-  - Suspicious CPU and RAM usage detection
-  - Temp executable anomaly scanning
-  - Optional offline AI score hook (`ml/anomaly_detector.py`)
-- Network Surveillance Layer
-  - Active connection inspection via `netstat -ano`
-  - DNS/port anomaly heuristics
-  - Interactive network map table in UI
-- Human Risk Monitor
-  - Unsafe download pattern detection
-  - Weak-password account policy flags
-  - Risk behavior markers
-- Isolation & Response Engine
-  - Process isolation (`taskkill`)
-  - File quarantine to local quarantine folder
-  - Registry rollback marker routine
-  - Local system snapshot generation
+- Native desktop GUI (`eframe/egui`) with dark theme.
+- Dashboard with security score, active threat count, and network visibility.
+- Automated operation engine:
+  - Interval-based automatic scans in background loop
+  - Optional automated response actions (process isolation + quarantine + snapshot)
+  - Live automation feed in the dashboard
+- Modular scanners:
+  - System Integrity Scanner
+  - Behavioral Threat Detection
+  - Network Surveillance Layer
+  - Human Risk Monitor
+  - Isolation & Response Engine
+- Kernel integration panel:
+  - Checks Windows service state for configured kernel driver service.
+  - Can request service start via SCM.
+- Settings menu:
+  - Edit and persist runtime config to `config/config.json`.
+  - EN/DE language support in one `.exe`.
+- Optional offline AI hook via Python script (`ml/anomaly_detector.py`).
 
-## UI
+## Important security boundary
 
-- Native desktop UI in Rust (`eframe/egui`)
-- Dark-mode professional interface
-- Dashboard with:
-  - Security score
-  - Active threats
-  - Network connection visibility
-- Color-coded risk levels:
-  - Green
-  - Yellow
-  - Red
-- Dual language UI controls (EN/DE) in one executable
+Stronghold includes real host telemetry and real response actions (process kill, file quarantine, registry key cleanup, snapshot export).
+Kernel-level **enforcement** still requires a separately developed and signed Windows kernel driver.
+This repo now includes the user-mode control path and service integration hooks, but not a production kernel driver.
 
-## Project Structure
+## Project structure
 
 ```text
 Stronghold/
@@ -55,12 +44,12 @@ Stronghold/
     logger.rs
     models.rs
     modules/
-      mod.rs
       ai.rs
-      integrity.rs
       behavior.rs
-      network.rs
       human_risk.rs
+      integrity.rs
+      kernel.rs
+      network.rs
       response.rs
   config/
     config.json
@@ -68,72 +57,87 @@ Stronghold/
     sample.log
   assets/
     icon.svg
+    INSTALLER.md
   ml/
     anomaly_detector.py
-  .gitignore
-  README.md
-  COPYRIGHT.txt
+  scripts/
+    build-installer.ps1
 ```
 
-## Requirements
+## Build and run (Windows)
 
-- Windows 10/11
-- Rust toolchain (stable) via `rustup`
-- MSVC build tools (for native compilation)
-- Optional: Python 3 for AI hook support
-
-## Build & Run (Windows)
-
-1. Install Rust:
-   - `rustup default stable`
-2. Build:
-   - `cargo build --release`
-3. Run (debug):
+1. Install Rust stable and MSVC toolchain.
+2. Run locally:
    - `cargo run`
-4. Release binary:
+3. Build release:
+   - `cargo build --release`
+4. Binary output:
    - `target/release/stronghold.exe`
+
+## Headless operation (real automated scans)
+
+- One-time real scan:
+  - `cargo run -- --scan-once`
+- One-time scan plus immediate auto-response:
+  - `cargo run -- --scan-once --auto-response`
+- Continuous daemon mode:
+  - `cargo run -- --daemon`
+
+Daemon mode uses local system telemetry on each cycle and appends structured scan history.
+
+## Installer (MSI)
+
+1. Run PowerShell script:
+   - `powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1 -Release`
+2. Output MSI:
+   - `target/wix/*.msi`
+
+Notes:
+- Script installs `cargo-wix` automatically.
+- WiX Toolset must be available on the build machine.
 
 ## Configuration
 
-Main config file: `config/config.json`
+Main file: `config/config.json`
 
-Key settings:
-- `default_language`: `"en"` or `"de"`
-- `cpu_alert_percent`: CPU alert threshold
-- `memory_alert_mb`: memory alert threshold in MB
-- `quarantine_dir`: local quarantine destination
-- `critical_files`: file integrity watch list
-- `startup_locations`: startup inspection folders
-- `weak_password_accounts`: policy flag list
-- `enable_ai_module`: enable/disable optional Python AI scoring
+Core options:
+- `default_language`
+- `cpu_alert_percent`
+- `memory_alert_mb`
+- `quarantine_dir`
+- `kernel_service_name`
+- `scan_history_path`
+- `incident_history_path`
+- `auto_scan_enabled`
+- `auto_scan_interval_seconds`
+- `auto_response_enabled`
+- `max_auto_isolations_per_cycle`
+- `max_auto_quarantines_per_cycle`
+- `critical_files`
+- `startup_locations`
+- `weak_password_accounts`
+- `enable_ai_module`
 
-## Offline Capability
+Generated runtime files:
+- scan summary JSONL: `logs/scan_summary.jsonl`
+- optional full scan history JSONL (debug/forensics): `logs/scan_history.jsonl`
+- incident history JSONL: `logs/incidents.jsonl`
 
-Stronghold is fully offline-capable.
-All scans and response actions operate locally on the host system.
-The optional AI module runs locally through Python and does not require network access.
+## Offline mode
 
-## Versioning
-
-Current app version: `26.1.1`
-
-Semantic versioning intent:
-- MAJOR: breaking architecture changes
-- MINOR: new features/modules
-- PATCH: bug fixes and hardening
+Stronghold is offline-capable by design.
+All scanner and response modules run locally without cloud dependency.
 
 ## Contributing
 
-1. Fork repository
-2. Create feature branch
-3. Run `cargo fmt` and `cargo check`
-4. Submit pull request with clear module-level change notes
+1. Create branch.
+2. Run `cargo fmt` and `cargo check`.
+3. Submit PR with module-level notes and test evidence.
+
+## Version
+
+Current version: `26.1.1`
 
 ## License
 
 See `COPYRIGHT.txt`.
-
-## Migration Note
-
-All previous HTML/CSS/JavaScript and hybrid runtime artifacts were removed.
-The application is now a single native Rust desktop executable workflow.

@@ -57,6 +57,7 @@ pub struct BehaviorReport {
     pub score: u8,
     pub risk_level: RiskLevel,
     pub suspicious_processes: Vec<String>,
+    pub suspicious_pids: Vec<u32>,
     pub high_memory_processes: Vec<String>,
     pub file_anomalies: Vec<String>,
     pub threats: Vec<ThreatItem>,

@@ -2,7 +2,7 @@ use crate::{
     config::AppConfig,
     models::{IntegrityReport, RiskLevel, ThreatItem},
 };
-use std::{fs, path::Path};
+use std::{fs, path::Path, process::Command};
 use sysinfo::System;
 
 pub fn run_scan(config: &AppConfig) -> IntegrityReport {
@@ -10,7 +10,8 @@ pub fn run_scan(config: &AppConfig) -> IntegrityReport {
     system.refresh_all();
 
     let running_processes = system.processes().len();
-    let startup_items = count_startup_items(&config.startup_locations);
+    let startup_items =
+        count_startup_items(&config.startup_locations) + count_registry_startup_items();
     let missing_critical_files = missing_critical_files(&config.critical_files);
 
     let mut score: i32 = 100;
@@ -60,6 +61,29 @@ fn count_startup_items(paths: &[String]) -> usize {
                 .unwrap_or(0)
         })
         .sum()
+}
+
+fn count_registry_startup_items() -> usize {
+    let keys = [
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+        r"HKLM\Software\Microsoft\Windows\CurrentVersion\Run",
+        r"HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+    ];
+
+    let mut count = 0;
+    for key in keys {
+        let output = Command::new("reg").args(["query", key]).output();
+        let Ok(output) = output else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&output.stdout);
+        count += text
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.contains("REG_SZ") || line.contains("REG_EXPAND_SZ"))
+            .count();
+    }
+    count
 }
 
 fn missing_critical_files(files: &[String]) -> Vec<String> {

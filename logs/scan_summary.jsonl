@@ -1,0 +1,5 @@
+{"scanned_at":"2026-02-14T14:33:33.233309900+01:00","security_score":67,"risk_level":"Yellow","active_threats":2,"network_connections":152,"integrity_score":90,"behavior_score":81,"network_score":100,"human_risk_score":0}
+{"scanned_at":"2026-02-14T14:53:44.662299100+01:00","security_score":65,"risk_level":"Yellow","active_threats":2,"network_connections":143,"integrity_score":90,"behavior_score":70,"network_score":100,"human_risk_score":0}
+{"scanned_at":"2026-02-14T14:54:02.128722500+01:00","security_score":67,"risk_level":"Yellow","active_threats":2,"network_connections":143,"integrity_score":90,"behavior_score":81,"network_score":100,"human_risk_score":0}
+{"scanned_at":"2026-02-14T14:54:04.767757900+01:00","security_score":67,"risk_level":"Yellow","active_threats":2,"network_connections":144,"integrity_score":90,"behavior_score":81,"network_score":100,"human_risk_score":0}
+{"scanned_at":"2026-02-14T14:54:46.652797500+01:00","security_score":67,"risk_level":"Yellow","active_threats":2,"network_connections":144,"integrity_score":90,"behavior_score":81,"network_score":100,"human_risk_score":0}

@@ -38,10 +38,8 @@ fn read_connections() -> Vec<ConnectionEntry> {
         return Vec::new();
     };
     let text = String::from_utf8_lossy(&output.stdout);
-    let re = Regex::new(
-        r"^(TCP|UDP)\s+(\S+)\s+(\S+)(?:\s+(\S+))?\s+(\d+)$",
-    )
-    .expect("valid netstat parser");
+    let re = Regex::new(r"^(TCP|UDP)\s+(\S+)\s+(\S+)(?:\s+(\S+))?\s+(\d+)$")
+        .expect("valid netstat parser");
 
     text.lines()
         .filter_map(|line| {
@@ -50,17 +48,32 @@ fn read_connections() -> Vec<ConnectionEntry> {
             let protocol = cap.get(1)?.as_str().to_string();
             let local = cap.get(2)?.as_str().to_string();
             let remote = cap.get(3)?.as_str().to_string();
-            let state = cap.get(4).map(|m| m.as_str()).unwrap_or("LISTENING");
+            let state = normalize_state(cap.get(4).map(|m| m.as_str()).unwrap_or("LISTENING"));
             let pid = cap.get(5).and_then(|m| m.as_str().parse::<u32>().ok());
             Some(ConnectionEntry {
                 protocol,
                 local,
                 remote,
-                state: state.to_string(),
+                state,
                 pid,
             })
         })
         .collect()
+}
+
+fn normalize_state(raw: &str) -> String {
+    let upper = raw.to_ascii_uppercase();
+    if upper.contains("ABH") || upper.contains("LISTEN") {
+        "LISTENING".to_string()
+    } else if upper.contains("HERGESTELLT") || upper.contains("ESTABLISHED") {
+        "ESTABLISHED".to_string()
+    } else if upper.contains("WARTEND") || upper.contains("TIME_WAIT") {
+        "TIME_WAIT".to_string()
+    } else if upper.contains("ZU") || upper.contains("CLOSE") {
+        "CLOSE_WAIT".to_string()
+    } else {
+        upper
+    }
 }
 
 fn detect_dns_anomalies(connections: &[ConnectionEntry]) -> Vec<String> {
@@ -71,13 +84,22 @@ fn detect_dns_anomalies(connections: &[ConnectionEntry]) -> Vec<String> {
         let unknown_remote = c.remote.starts_with("0.0.0.0") || c.remote.starts_with("[::]");
 
         if is_dns && c.state == "ESTABLISHED" {
-            anomalies.push(format!("Unusual established DNS flow: {} -> {}", c.local, c.remote));
+            anomalies.push(format!(
+                "Unusual established DNS flow: {} -> {}",
+                c.local, c.remote
+            ));
         }
         if suspicious_port {
-            anomalies.push(format!("Potential discovery abuse port usage: {}", c.remote));
+            anomalies.push(format!(
+                "Potential discovery abuse port usage: {}",
+                c.remote
+            ));
         }
         if unknown_remote && c.state == "ESTABLISHED" {
-            anomalies.push(format!("Established connection to unspecified endpoint: {}", c.remote));
+            anomalies.push(format!(
+                "Established connection to unspecified endpoint: {}",
+                c.remote
+            ));
         }
     }
     anomalies

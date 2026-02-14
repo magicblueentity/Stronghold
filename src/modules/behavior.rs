@@ -11,12 +11,14 @@ pub fn run_scan(config: &AppConfig) -> BehaviorReport {
     system.refresh_all();
 
     let mut suspicious_processes = Vec::new();
+    let mut suspicious_pids = Vec::new();
     let mut high_memory_processes = Vec::new();
 
-    for process in system.processes().values() {
+    for (pid, process) in system.processes() {
         let name = process.name().to_string_lossy().to_string();
         if process.cpu_usage() >= config.cpu_alert_percent {
             suspicious_processes.push(format!("{name} (CPU {:.1}%)", process.cpu_usage()));
+            suspicious_pids.push(pid.as_u32());
         }
         let memory_mb = process.memory() / (1024 * 1024);
         if memory_mb >= config.memory_alert_mb {
@@ -56,7 +58,10 @@ pub fn run_scan(config: &AppConfig) -> BehaviorReport {
     if !file_anomalies.is_empty() {
         threats.push(ThreatItem {
             source: "Behavior".to_string(),
-            summary: format!("{} suspicious executable files in temp folders", file_anomalies.len()),
+            summary: format!(
+                "{} suspicious executable files in temp folders",
+                file_anomalies.len()
+            ),
             risk: RiskLevel::Red,
         });
     }
@@ -65,6 +70,7 @@ pub fn run_scan(config: &AppConfig) -> BehaviorReport {
         score,
         risk_level,
         suspicious_processes,
+        suspicious_pids,
         high_memory_processes,
         file_anomalies,
         threats,

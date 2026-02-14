@@ -3,11 +3,21 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
     pub default_language: String,
     pub cpu_alert_percent: f32,
     pub memory_alert_mb: u64,
     pub quarantine_dir: String,
+    pub kernel_service_name: String,
+    pub scan_history_path: String,
+    pub scan_summary_path: String,
+    pub incident_history_path: String,
+    pub auto_scan_enabled: bool,
+    pub auto_scan_interval_seconds: u64,
+    pub auto_response_enabled: bool,
+    pub max_auto_isolations_per_cycle: usize,
+    pub max_auto_quarantines_per_cycle: usize,
     pub critical_files: Vec<String>,
     pub startup_locations: Vec<String>,
     pub weak_password_accounts: Vec<String>,
@@ -21,6 +31,15 @@ impl Default for AppConfig {
             cpu_alert_percent: 70.0,
             memory_alert_mb: 800,
             quarantine_dir: "logs/quarantine".to_string(),
+            kernel_service_name: "StrongholdKernel".to_string(),
+            scan_history_path: "logs/scan_history.jsonl".to_string(),
+            scan_summary_path: "logs/scan_summary.jsonl".to_string(),
+            incident_history_path: "logs/incidents.jsonl".to_string(),
+            auto_scan_enabled: true,
+            auto_scan_interval_seconds: 180,
+            auto_response_enabled: false,
+            max_auto_isolations_per_cycle: 2,
+            max_auto_quarantines_per_cycle: 2,
             critical_files: vec![
                 "C:/Windows/System32/drivers/etc/hosts".to_string(),
                 "C:/Windows/System32/cmd.exe".to_string(),
@@ -55,5 +74,14 @@ impl AppConfig {
         let json = serde_json::to_string_pretty(&default)?;
         fs::write(path, json).with_context(|| format!("Unable to create config at {path}"))?;
         Ok(default)
+    }
+
+    pub fn save(&self, path: &str) -> Result<()> {
+        if let Some(parent) = Path::new(path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self)?;
+        fs::write(path, json).with_context(|| format!("Unable to write config at {path}"))?;
+        Ok(())
     }
 }

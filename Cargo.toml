@@ -6,6 +6,12 @@ authors = ["Stronghold Team"]
 description = "Native Rust desktop security workstation"
 license = "MIT"
 
+[package.metadata.wix]
+upgrade-guid = "0E2F7159-E8D2-4514-BA77-A1F5918A0188"
+path-guid = "45D5C4FC-9259-4EB4-8F40-E8804A1E3CE1"
+license = "COPYRIGHT.txt"
+eula = false
+
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
