@@ -1,0 +1,9 @@
+﻿{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default desktop capabilities for ANCORATE STRONGHOLD",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

@@ -1,0 +1,31 @@
+﻿[package]
+name = "ancorate-stronghold"
+version = "26.1.1"
+description = "ANCORATE STRONGHOLD desktop security suite"
+authors = ["ANCORATE"]
+license = "Proprietary"
+repository = ""
+edition = "2021"
+rust-version = "1.78"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = "0.33"
+sha2 = "0.10"
+walkdir = "2"
+dirs = "6"
+anyhow = "1"
+thiserror = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true
