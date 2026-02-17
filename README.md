@@ -134,9 +134,11 @@ All scanner and response modules run locally without cloud dependency.
 2. Run `cargo fmt` and `cargo check`.
 3. Submit PR with module-level notes and test evidence.
 
+It would be lovely if someone created a signed driver for this.
+
 ## Version
 
-Current version: `26.1.1`
+Current version: `26.0`
 
 ## License
 
